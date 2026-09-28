@@ -11,6 +11,29 @@ TripForge 的所有重要变更都会记录在此文件中。
 
 ---
 
+## [1.22.0] - 2026-09-28
+
+### 功能增强
+
+- **交通段与地图线路点击导航（时间轴 pill / 地图 polyline → 高德导航）**：
+  - 背景：时间轴中间的路程段（如「驾车 23分钟 · 9.4km」）与地图上的路线只可看不可导；本轮点击两处均打开高德新标签导航
+  - 新增 `utils/navigation.ts`：**有起终点坐标** → `uri.amap.com/navigation?from=lng,lat,name&to=…&mode=…&callnative=1`（网页版路线规划，有高德 App 则唤起）；**坐标缺失** → `uri.amap.com/direction` POI 名称导航降级；出行方式映射 walk→walk、drive/taxi→car/bike、transit/subway→bus、mixed→car；两端均无有效输入不动作
+  - 时间轴 `TransitConnector`：pill 由 div 升级为 `<button>`，新增 hover 上浮+阴影、聚焦 ring、外链图标、`title=点击导航此路段`；`DayTimeline` 新增 `navPointOf(index, dir)` **坐标就近吸附**——起点向前/终点向后找最近有坐标活动（rest 无坐标时「原地休息」语义：起点吸附到前一活动、终点吸附到休息节点所接管路程的下一有坐标活动）
+  - 地图 `TripMap.addPolylines`：每条线路 `click` → 按该段活动起终点与出行方式打开导航；`mouseover/out` 切换 `pointer` 光标提示可点击
+  - `types.ts` Activity 补充 `lat?/lng?` 显式字段（此前靠 index signature 兜底）
+  - 文件：`frontend-new/src/utils/navigation.ts`（新增）、`frontend-new/src/components/timeline/{TransitConnector.vue,DayTimeline.vue}`、`frontend-new/src/components/map/TripMap.vue`、`frontend-new/src/api/types.ts`
+
+### 验证方式与结果（2026-09-28）
+
+| 项 | 结果 |
+|---|---|
+| `npm run build`（vue-tsc 类型检查 + Vite 打包） | BUILD OK ✅ |
+| 发布管线：`robocopy /MIR` → stop → `mvn -o package -DskipTests` → start | 8081-8086 全 UP（TCP 探测）、gateway 首页 200 ✅ |
+| 回归冒烟 `verify-d.js` | 22/22 PASS ✅ |
+| 导航 URL 构造（坐标导航 / POI 名称降级 / rest 吸附端点） | 代码走查 + build 通过，**未做人工浏览器点击**（window.open 无法无头验证，需人工点一次 pill 与地图线路确认新标签打开高德页）⚠️ |
+
+---
+
 ## [1.21.0] - 2026-09-28
 
 ### 新功能

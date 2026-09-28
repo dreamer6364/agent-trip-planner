@@ -11,6 +11,7 @@ import {
   TYPE_THEMES,
   MODE_THEMES,
 } from '@/utils/mapTheme'
+import { openNavigation } from '@/utils/navigation'
 
 interface Props {
   activities: Activity[]
@@ -703,6 +704,33 @@ function addPolylines() {
       showDir: !isFallback,
       strokeStyle: isFallback ? 'dashed' : 'solid',
       zIndex: 50,
+    })
+
+    // 点击线路导航此路段（v1.22.0）：起终点取两端活动坐标，hover 显示可点击光标
+    const navFrom = activities[i]
+    const navTo = activities[i + 1]
+    const fa = activityCoord(navFrom)
+    const fb = activityCoord(navTo)
+    polyline.on('click', () => {
+      openNavigation(
+        { lat: fa?.lat, lng: fa?.lng, name: navFrom.poiName },
+        { lat: fb?.lat, lng: fb?.lng, name: navTo.poiName },
+        mode,
+      )
+    })
+    polyline.on('mouseover', () => {
+      try {
+        map.setCursor('pointer')
+      } catch {
+        /* 低版本 AMap 无 setCursor 忽略 */
+      }
+    })
+    polyline.on('mouseout', () => {
+      try {
+        map.setCursor('')
+      } catch {
+        /* 同上 */
+      }
     })
 
     polylines.push(polyline)

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { formatDurationText, TRANSPORT_LABELS } from '@/utils/activity'
+import { openNavigation, type NavPoint } from '@/utils/navigation'
 
 const props = defineProps<{
   mode: string
@@ -8,6 +9,9 @@ const props = defineProps<{
   distanceMeters?: number
   fromName?: string
   toName?: string
+  /** 导航起终点（含坐标；缺坐标时 util 降级 POI 名称导航），缺省不渲染为可点击 */
+  from?: NavPoint
+  to?: NavPoint
 }>()
 
 const modeConfig = computed(() => {
@@ -44,6 +48,13 @@ const modeConfig = computed(() => {
 const modeLabel = computed(() => TRANSPORT_LABELS[props.mode] || modeConfig.value.label)
 const durationText = computed(() => formatDurationText(props.durationMin))
 
+const canNav = computed(() => !!props.from && !!props.to)
+
+function navigate() {
+  if (!props.from || !props.to) return
+  openNavigation(props.from, props.to, props.mode)
+}
+
 const distanceText = computed(() => {
   const m = Number(props.distanceMeters ?? 0) || 0
   if (m <= 0) return ''
@@ -58,7 +69,34 @@ const distanceText = computed(() => {
       <div class="w-px flex-1 border-l border-dashed border-surface-300 dark:border-surface-600" />
     </div>
 
+    <button
+      v-if="canNav"
+      type="button"
+      class="relative z-10 ml-2 flex items-center gap-2 rounded-full border px-3 py-1.5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 cursor-pointer"
+      :class="modeConfig.ring"
+      title="点击导航此路段"
+      @click="navigate"
+    >
+      <div class="flex h-6 w-6 items-center justify-center rounded-full bg-white/80 dark:bg-surface-900/40" :class="modeConfig.color">
+        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="modeConfig.icon" />
+        </svg>
+      </div>
+      <span class="text-xs font-bold" :class="modeConfig.color">
+        {{ modeLabel }}
+      </span>
+      <span class="text-xs font-semibold tabular-nums text-surface-700 dark:text-surface-300">
+        {{ durationText }}
+      </span>
+      <span v-if="distanceText" class="text-xs text-surface-500 dark:text-surface-400">
+        · {{ distanceText }}
+      </span>
+      <svg class="h-3 w-3 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+      </svg>
+    </button>
     <div
+      v-else
       class="relative z-10 ml-2 flex items-center gap-2 rounded-full border px-3 py-1.5 shadow-sm"
       :class="modeConfig.ring"
     >

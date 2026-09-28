@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import type { Activity } from '@/api/types'
 import { effectiveTravelMinutes } from '@/utils/activity'
+import type { NavPoint } from '@/utils/navigation'
 import ActivityCard from './ActivityCard.vue'
 import TransitConnector from './TransitConnector.vue'
 
@@ -61,6 +62,26 @@ function handleFocus(activity: Activity) {
 /** 到下一站的交通分钟数：真实值优先，为 0 时按坐标估算，避免展示「0分钟」 */
 function travelToNext(activity: Activity, index: number): number {
   return effectiveTravelMinutes(activity, props.day.items[index + 1])
+}
+
+/**
+ * 导航端点：活动有坐标直接用；无坐标（如 rest 原地休息）沿时间轴就近吸附到
+ * 最近的有坐标活动——起点向前吸附（休息发生在前一活动处），终点向后吸附
+ * （休息节点接管的路程通向后一有坐标活动）。
+ */
+function navPointOf(index: number, dir: -1 | 1): NavPoint {
+  const items = props.day.items
+  const src = items[index]
+  if (!src) return { name: '' }
+  for (let i = index; i >= 0 && i < items.length; i += dir) {
+    const a = items[i]
+    const lat = Number(a.lat)
+    const lng = Number(a.lng)
+    if (Number.isFinite(lat) && Number.isFinite(lng) && (lat || lng)) {
+      return { lat, lng, name: a.poiName }
+    }
+  }
+  return { name: src.poiName }
 }
 
 function isActive(activity: Activity) {
@@ -124,6 +145,8 @@ function isActive(activity: Activity) {
             :distance-meters="Number(activity.travelDistanceMeters ?? 0)"
             :from-name="activity.poiName"
             :to-name="day.items[index + 1]?.poiName"
+            :from="navPointOf(index, -1)"
+            :to="navPointOf(index + 1, 1)"
           />
         </template>
       </div>

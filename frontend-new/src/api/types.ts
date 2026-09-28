@@ -205,6 +205,9 @@ export interface Activity {
   slogan?: string
   poiCategory?: string
   poiAddress?: string
+  /** 地图坐标（后端有则返回，休息节点 rest 无坐标） */
+  lat?: number
+  lng?: number
   /** 餐厅/POI 评分与人均（v1.15.0） */
   rating?: number
   cost?: string
