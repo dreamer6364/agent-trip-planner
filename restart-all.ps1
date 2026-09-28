@@ -2,12 +2,13 @@ Get-Process -Name java -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Seconds 3
 
 $javaPath = "C:\Program Files\Java\jdk-21.0.10\bin\java.exe"
-# Load secrets from .env (not committed, see .gitignore)
+# Load secrets from .env (not committed, see .gitignore) - whitelisted keys only
 $AmapKey = $null; $llmKey = $null
 $envFile = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) '.env'
+$allowedEnvKeys = @('AMAP_API_KEY', 'ZHIPU_API_KEY')
 if (Test-Path $envFile) {
     foreach ($line in Get-Content $envFile) {
-        if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$') {
+        if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$' -and $allowedEnvKeys -contains $Matches[1]) {
             [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2].Trim(), 'Process')
         }
     }
