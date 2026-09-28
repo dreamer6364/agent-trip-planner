@@ -1,0 +1,221 @@
+version: '3.8'
+
+services:
+  # ==========================================
+  # 基础设施服务
+  # ==========================================
+  
+  mysql:
+    image: mysql:8.0
+    container_name: trip-planner-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-12345678mxy}
+      MYSQL_DATABASE: trip_planner
+      MYSQL_USER: ${MYSQL_USER:-trip_planner}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-12345678mxy}
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init-sql:/docker-entrypoint-initdb.d
+    ports:
+      - "3307:3306"
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --max_connections=1000
+      - --innodb_buffer_pool_size=1G
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-12345678mxy}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - trip-planner-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: trip-planner-redis
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - trip-planner-network
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: trip-planner-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_log:/var/lib/zookeeper/log
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - trip-planner-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: trip-planner-kafka
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 12
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    networks:
+      - trip-planner-network
+
+  # ==========================================
+  # 监控服务
+  # ==========================================
+
+  victoria-metrics:
+    image: victoriametrics/victoria-metrics:v1.93.0
+    container_name: trip-planner-vm
+    command:
+      - '--storageDataPath=/data'
+      - '--retentionPeriod=30d'
+      - '--httpListenAddr=:8428'
+      - '--search.maxPointsPerTimeseries=100000'
+    volumes:
+      - vm_data:/data
+    ports:
+      - "8428:8428"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8428/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks:
+      - trip-planner-network
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.50
+    container_name: trip-planner-jaeger
+    user: root
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+      SPAN_STORAGE_TYPE: badger
+      BADGER_EPHEMERAL: false
+      BADGER_DIRECTORY_VALUE: /go/bin/data
+      JAEGER_SERVICE_NAME: trip-planner
+    volumes:
+      - jaeger_data:/go/bin/data
+    ports:
+      - "16686:16686"  # UI
+      - "4317:4317"    # OTLP gRPC
+      - "4318:4318"    # OTLP HTTP
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:16686/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks:
+      - trip-planner-network
+
+  vector:
+    image: timberio/vector:0.38.0-alpine
+    container_name: trip-planner-vector
+    volumes:
+      - ./vector/vector.yaml:/etc/vector/vector.yaml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - victoria-metrics
+      - jaeger
+    networks:
+      - trip-planner-network
+
+  # ==========================================
+  # 应用服务 (开发模式下注释，使用 IDE 直接启动)
+  # ==========================================
+
+  # gateway:
+  #   build:
+  #     context: ./gateway
+  #     dockerfile: Dockerfile
+  #   container_name: trip-planner-gateway
+  #   ports:
+  #     - "8080:8080"
+  #   environment:
+  #     SPRING_PROFILES_ACTIVE: docker
+  #     JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+  #     REDIS_HOST: redis
+  #     KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  #     VICTORIA_METRICS_URL: http://victoria-metrics:8428
+  #     JAEGER_ENDPOINT: http://jaeger:4318/v1/traces
+  #   depends_on:
+  #     mysql:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #     kafka:
+  #       condition: service_healthy
+  #   networks:
+  #     - trip-planner-network
+
+  # auth-service, trip-service, plan-service, geo-service, planning-worker, notification-service
+  # 同理，开发时使用 IDE 启动，生产时取消注释
+
+  # ==========================================
+  # 前端 (开发模式)
+  # ==========================================
+
+  # frontend:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile
+  #   container_name: trip-planner-frontend
+  #   ports:
+  #     - "3000:80"
+  #   depends_on:
+  #     - gateway
+  #   networks:
+  #     - trip-planner-network
+
+volumes:
+  mysql_data:
+  redis_data:
+  zookeeper_data:
+  zookeeper_log:
+  kafka_data:
+  vm_data:
+  jaeger_data:
+
+networks:
+  trip-planner-network:
+    driver: bridge
+    name: trip-planner-network

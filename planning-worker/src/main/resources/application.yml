@@ -1,0 +1,104 @@
+server:
+  port: 8084
+
+spring:
+  main:
+    allow-bean-definition-overriding: true
+  application:
+    name: planning-worker
+
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:local}
+
+  datasource:
+    # 与其余服务保持一致：本机 MySQL80(3306) + root；
+    # 此前默认 3307/trip_planner 指向 Docker MySQL，且账号不匹配，
+    # 导致 planning-worker 启动后一直无法就绪（健康检查 DOWN）
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:trip_planner}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:12345678mxy}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  redis:
+    host: ${REDIS_HOST:localhost}
+    port: ${REDIS_PORT:6379}
+    password: ${REDIS_PASSWORD:}
+    database: 3
+    timeout: 5000ms
+    lettuce:
+      pool:
+        max-active: 20
+        max-idle: 10
+        min-idle: 5
+
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+
+# MyBatis-Plus 配置
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    db-config:
+      id-type: assign_uuid
+
+# 求解器配置
+solver:
+  max-time-seconds: ${SOLVER_TIMEOUT_SECONDS:30}
+  num-workers: ${SOLVER_WORKERS:4}
+  log-search-progress: true
+  relative-gap-limit: 0.01
+  heuristic-threshold: 15
+
+# Plan Service URL
+plan-service:
+  url: ${PLAN_SERVICE_URL:http://localhost:8083}
+
+# Trip Service URL
+trip-service:
+  url: ${TRIP_SERVICE_URL:http://localhost:8082}
+
+# Worker 配置
+worker:
+  concurrency: ${WORKER_CONCURRENCY:4}
+
+# Actuator & 监控
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+
+# OpenAPI / Swagger
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+  version: 1.0.0
+
+# 日志
+logging:
+  level:
+    com.tripplanner.worker: INFO
+    org.springframework.kafka: WARN
+    com.google.ortools: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"

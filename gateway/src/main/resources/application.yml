@@ -1,0 +1,179 @@
+server:
+  port: 8086
+
+spring:
+  application:
+    name: gateway
+
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:local}
+
+  cloud:
+    gateway:
+      httpclient:
+        response-timeout: 300s
+        connect-timeout: 10000
+      discovery:
+        locator:
+          enabled: false  # 不使用服务发现，使用静态路由
+      routes:
+        # 路由在 RouteConfig.java 中通过 Java DSL 定义
+      default-filters: []
+
+  redis:
+    host: ${REDIS_HOST:localhost}
+    port: ${REDIS_PORT:6379}
+    password: ${REDIS_PASSWORD:}
+    database: 5
+    timeout: 5000ms
+    lettuce:
+      pool:
+        max-active: 50
+        max-idle: 20
+        min-idle: 5
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+
+# JWT 配置 (公钥验签)
+jwt:
+  public-key: ${JWT_PUBLIC_KEY:classpath:keys/public_key.pem}
+
+# 限流配置
+rate-limit:
+  default:
+    replenish-rate: 100    # 每秒令牌数
+    burst-capacity: 200    # 桶容量
+  auth:
+    replenish-rate: 10
+    burst-capacity: 20
+  api:
+    replenish-rate: 50
+    burst-capacity: 100
+
+# 熔断器配置
+circuit-breaker:
+  trip-service:
+    failure-rate-threshold: 50
+    wait-duration: 30s
+    sliding-window-size: 10
+    timeout: 300s
+  plan-service:
+    failure-rate-threshold: 50
+    wait-duration: 30s
+    sliding-window-size: 10
+    timeout: 300s
+  default:
+    timeout: 300s
+
+# Resilience4j 配置
+resilience4j:
+  circuitbreaker:
+    instances:
+      trip-service:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenState: true
+        waitDurationInOpenState: 30s
+        failureRateThreshold: 50
+        timeoutDuration: 300s
+        recordExceptions:
+          - java.io.IOException
+          - java.util.concurrent.TimeoutException
+          - org.springframework.web.reactive.function.client.WebClientResponseException
+      plan-service:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenState: true
+        waitDurationInOpenState: 30s
+        failureRateThreshold: 50
+        timeoutDuration: 300s
+        recordExceptions:
+          - java.io.IOException
+          - java.util.concurrent.TimeoutException
+          - org.springframework.web.reactive.function.client.WebClientResponseException
+      auth-service:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenState: true
+        waitDurationInOpenState: 30s
+        failureRateThreshold: 50
+      notification-service:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenState: true
+        waitDurationInOpenState: 30s
+        failureRateThreshold: 50
+
+  timelimiter:
+    instances:
+      default:
+        timeoutDuration: 300s
+        cancelRunningFuture: false
+      trip-service:
+        timeoutDuration: 300s
+        cancelRunningFuture: false
+      plan-service:
+        timeoutDuration: 300s
+        cancelRunningFuture: false
+
+  ratelimiter:
+    instances:
+      default:
+        limitForPeriod: 100
+        limitRefreshPeriod: 1s
+        timeoutDuration: 500ms
+
+# Actuator & 监控
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,gateway,circuitbreakers,ratelimiters
+  endpoint:
+    gateway:
+      enabled: true
+    health:
+      show-details: always
+    circuitbreakers:
+      enabled: true
+    ratelimiters:
+      enabled: true
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+
+# OpenAPI / Swagger
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+  version: 1.0.0
+
+# 日志
+logging:
+  level:
+    com.tripplanner.gateway: INFO
+    org.springframework.cloud.gateway: INFO
+    org.springframework.security: INFO
+    org.springframework.web.reactive: INFO
+    reactor.netty.http.server: INFO
+    io.github.resilience4j: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"

@@ -1,0 +1,143 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: plan-service
+
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:local}
+
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:trip_planner}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:12345678mxy}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  redis:
+    host: ${REDIS_HOST:localhost}
+    port: ${REDIS_PORT:6379}
+    password: ${REDIS_PASSWORD:}
+    database: 2
+    timeout: 5000ms
+    lettuce:
+      pool:
+        max-active: 20
+        max-idle: 10
+        min-idle: 5
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: ${KAFKA_CONSUMER_GROUP_PLANNING:planning-worker-group}
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "com.tripplanner.*"
+        spring.json.use.type.headers: false
+        spring.json.value.default.type: java.util.Map
+    listener:
+      ack-mode: manual_immediate
+      concurrency: 3
+
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+
+# MyBatis-Plus 配置
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    db-config:
+      id-type: assign_uuid
+
+# LLM 配置 (智谱 GLM-4-Flash 免费模型)
+llm:
+  base-url: ${LLM_BASE_URL:https://open.bigmodel.cn/api/paas/v4}
+  api-key: ${LLM_API_KEY:}
+  model: ${LLM_MODEL:glm-4-flash}
+  timeout-seconds: 180
+  max-tokens: 4096
+  temperature: 0.3
+
+# 智谱 GLM 配置
+zhipu:
+  api-key: ${ZHIPU_API_KEY:}
+  model: ${ZHIPU_MODEL:glm-4-flash}
+  base-url: https://open.bigmodel.cn/api/paas/v4
+
+# 高德地图 API
+amap:
+  api-key: ${AMAP_API_KEY:}
+  api-secret: ${AMAP_API_SECRET:}
+  geocode-url: https://restapi.amap.com/v3/geocode/geo
+  regeocode-url: https://restapi.amap.com/v3/geocode/regeo
+  route-url: https://restapi.amap.com/v3/direction/driving
+  transit-url: https://restapi.amap.com/v3/direction/transit/integrated
+  walk-url: https://restapi.amap.com/v3/direction/walking
+  bicycle-url: https://restapi.amap.com/v4/direction/bicycling
+  place-url: https://restapi.amap.com/v3/place/text
+  qps-limit: 50
+
+# 百度地图 API
+baidu:
+  api-key: ${BAIDU_API_KEY:}
+  api-secret: ${BAIDU_API_SECRET:}
+  geocode-url: https://api.map.baidu.com/geocoding/v3
+  route-url: https://api.map.baidu.com/direction/v2/driving
+  transit-url: https://api.map.baidu.com/direction/v2/transit
+  qps-limit: 30
+
+# 限流配置
+rate-limit:
+  default-qps: 100
+  geocode-qps: 30
+  route-qps: 20
+
+# Actuator & 监控
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+
+# OpenAPI / Swagger
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+  version: 1.0.0
+
+# 日志
+logging:
+  level:
+    root: INFO
+    com.tripplanner.plan: INFO
+    org.apache.kafka: WARN
+    org.springframework.kafka: WARN
+    org.springframework.web.reactive.function.client: WARN
+    reactor.netty: WARN
+    io.netty: WARN
+    org.apache.ibatis: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"

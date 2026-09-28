@@ -1,0 +1,591 @@
+# Bug 修复日志
+
+TripForge 的所有 Bug 修复都会记录在此文件中。
+
+**重要：每次 Bug 修复都必须在此文件中记录，包含问题描述、原因分析、修复方案、验证方式。新记录追加在最上方，格式为 `## [版本号] - YYYY-MM-DD`。**
+
+**版本号规则**：与 `docs/CHANGELOG.md` 使用同一版本序列（基线 1.11.0，功能新增 → 次版本 +1，修复/部署类 → 修订号 +1）。同一版本的修复与功能条目版本号保持一致，便于对齐查阅。
+
+> **基线说明**：本文件于 2026-09-25 重置，此前的历史修复记录已按要求舍弃，不作为追溯依据。
+> 当前基线版本为 **1.11.0**，其后所有修复以此为起点递增。
+
+---
+
+## [1.18.0] - 2026-09-28
+
+### 修复
+
+- **`isExcludedName` 双向 contains 误伤长名称景点**：
+  - 现象：换版排除「西湖」时，`西湖文化广场`/`西湖银泰` 等因包含「西湖」被一并排除——排除清单命中范围超出语义预期；反之排除「南宋德寿宫遗址博物馆」时短词表不易命中全称
+  - 原因：旧实现为双向 `String.contains`（排除词 in 候选名 或 候选名 in 排除词），2 字核心词（西湖/灵隐）作为子串可命中大量无关地点
+  - 修复：`isExcludedName` 重写为「等值 + 有条件前缀」——① 全名等值；② `stripDecorations` 剥 `（）()【】[]` 括号装饰后 bare 名等值；③ 双向**前缀**匹配且**短名 ≥3 字**才生效（「西湖」不足 3 字不触发前缀，「楼外楼(湖滨店)」bare=楼外楼可命中）；逻辑随 `VariantExclusions` 静态工具类抽取并新增 14 用例单测覆盖边界
+  - 文件：`plan-service/.../agent/VariantExclusions.java`（自 TripPlanningAgent 抽取）、`plan-service/src/test/.../VariantExclusionsTest.java`
+
+- **换版排除未贯穿 `ensureCompleteItinerary` 候选源**：
+  - 现象：1.17.0 已将 `removeExcludedFromPool` 接入 `fillPaceGaps`，但 `ensureCompleteItinerary` 的 `cityPool`（静态城市景点库）仍可能插入基准版本已用景点——排除存在漏网路径
+  - 修复：`ensureCompleteItinerary` 增 `excludePois`/`rawInput` 参数（`ensureCompleteStep` 同步传参），`cityPool` 构建后同样过滤——**所有候选源（fillPaceGaps/refillPaceGaps/ensureComplete）统一贯穿**
+  - 文件：`plan-service/.../agent/TripPlanningAgent.java`
+
+- **E2E `verify-d.js` D-2 断言硬编码「楼外楼」与换版后数据失配**：
+  - 现象：1.18.0 回归跑 D-2 四项全 FAIL（`meal=undefined`）——T3 当前版本已是换版产物（v6/v7 午餐=牛New寿喜烧），断言按名称 `includes('楼外楼')` 找餐次必落空
+  - 修复：断言数据无关化——取「首个 `rating>0` 的餐次，兜底首个餐次」，rating 断言改为 `0<rating≤5` 区间（原硬编码 4.5）；地址/坐标断言随取到的餐次生效
+  - 文件：`C:\Users\meng\AppData\Local\Temp\opencode\verify-d.js`（临时 E2E 脚本）
+
+- **E2E 测试数据无清理机制，版本无限累积**：
+  - 现象：每轮 E2E 都使测试行程版本 +1（回滚行程已累积至 12 个版本），历史断言依赖的版本号漂移、库表膨胀
+  - 修复：后端无版本删除 API，改为 E2E 脚本开跑前直接清库——`verify-variant.js` 保留最近 6 个版本（current 永不删）；`verify-rollback.js` 保留 8 个且**永保 v1**（回滚断言依赖）；mysql.exe 经 `child_process.execFileSync` 调用，清理结果打印剩余版本数
+  - 文件：`opencode/verify-variant.js`、`opencode/verify-rollback.js`（临时 E2E 脚本）
+
+### 验证方式与结果（2026-09-28）
+
+| 项 | 结果 |
+|---|---|
+| `VariantExclusionsTest` 14 用例（等值/装饰剥离/短名前缀边界/池过滤/元数据剥离） | **14/14 PASS** ✅ |
+| `mvn -o -q test -pl plan-service,trip-service,common-module -am` | **全绿** ✅ |
+| `verify-d.js`（D-2 数据无关化后复跑） | **22/22 PASS** ✅ |
+| `verify-variant.js`（清理机制生效：清理后剩 6 版本；Jaccard 断言过） | **16/16 PASS** ✅ |
+| `verify-rollback.js`（清理生效：剩 7 版本、v1 保护；fork 正常创建并删除） | **17/17 PASS** ✅ |
+| `start-all.ps1 -Action tail -Service plan-service`（UTF-8 日志读取入口） | 语法 0 错、输出正常 ✅ |
+
+---
+
+## [1.17.0] - 2026-09-27
+
+### 修复
+
+- **换版规划排除不生效：基准版本旧景点在新版本再现**：
+  - 现象：`verify-variant.js` 断言「rawInput 未提到的旧景点不再出现」连续失败——v4 与 v3 景点集合 4/4 完全相同（雷峰塔再现）；日志显示 `enforceVariantExclusions` 已执行但「替换景点 0 个」
+  - 原因（三重）：① LLM 按自身知识补齐景点，绕过提示词软约束（`day1 缺口填充` 日志证实另有来源）；② `fillPaceGaps`/`refillPaceGaps` 用未过滤的 `buildCityPool(city)`（静态城市景点库，含雷峰塔），且在**清洗之后**执行，直接插回排除项；③ LLM 异常回退路径（catch 块）完全没有换版清洗
+  - 修复（三层加固）：① **候选池层**：`augmentVariantPlaces` 候选上探至 `totalDays*maxVisits+8` 并留存 `variantRepairPool`；② **提示词层**：variantBlock 增加「系统会在输出后强制校验并替换」告知；③ **输出层**：`enforceVariantExclusions` 硬清洗——违规 visit 换候选池合规地点（清 lat/lng/address/rating/cost 残留，交后续真实路网重新地理编码）、违规餐段 `searchNearby` 换餐厅（失败退化为纯「午餐/晚餐」前缀）；另新增 `removeExcludedFromPool` 进 `fillPaceGaps` 候选池（rawInput 提到的主题地点保留），回退路径补调清洗
+  - 文件：`plan-service/.../agent/TripPlanningAgent.java`
+
+- **版本对比视图活动名称全部空白**：
+  - 现象：`VersionCompareView` 中两列活动名均为空，diff 状态与统计全错
+  - 原因：trip-service `TripVersionResponse` 直接返回存储 JSON 原样（**snake_case** `poi_name`），组件直接读 `activity.poiName` 恒为 undefined
+  - 修复：组件内统一经 `normalizeActivities`（`utils/activity.ts`）转换为 camelCase 后再渲染，与时间轴等既有消费方一致
+  - 文件：`frontend-new/src/components/version/VersionCompareView.vue`
+
+- **`SloganService.isGeneric` 漏判「动词+景点名+后缀」泛化文案**：
+  - 现象：`verify-d.js` D-3 失败——LLM 在新版本存入「游览西湖美景」，读路径判定为非泛化未替换，E2E 泛化检查不通过
+  - 原因：`isGeneric` 剥离动词后剩「西湖美景」≠ 核心名「西湖」，等值判定不命中；随后 `s.contains(core)` 规则将其判为非泛化
+  - 修复：动词剥离标记 `verbStripped`，剥离后以核心名开头（`游览西湖美景`/`逛河坊街夜市`）判泛化；**未带动词的点题句**（「张生记，一城风味落座」）不受影响（避免误伤词库外好文案）；读时自动替换为词库签名（西湖→「一半湖山一半城」）
+  - 文件：`trip-service/.../service/SloganService.java`、`trip-service/src/test/.../SloganServiceTest.java`（新增 1 用例）
+
+### 验证方式与结果（2026-09-27）
+
+| 项 | 结果 |
+|---|---|
+| `verify-variant.js`（换版全链路 14 断言，历经 3 轮修复迭代 13/14→12/14→**14/14**） | **14/14 PASS** ✅ |
+| 关键断言：景点集合≠基准（v5{西湖,灵隐寺,龙井村,河坊街}→v6{西湖,断桥,灵隐寺,雷峰塔,河坊街}，龙井村被排除替换、主题三景保留） | ✅ |
+| `verify-d.js` D 类回归（复跑） | **22/22 PASS**（D-3 西湖→「一半湖山一半城」）✅ |
+| `verify-rollback.js` 回归（复跑） | **17/17 PASS** ✅ |
+| `mvn -o test -pl common-module,trip-service,plan-service -am` | **全绿**（Slogan 20 + CityOwnership 15）✅ |
+| 非变体路径影响面 | `removeExcludedFromPool` 对空排除列表直接 no-op ✅ |
+
+---
+
+## [1.16.3] - 2026-09-27
+
+### 修复
+
+- **时间轴卡片悬浮按钮（定位/交换位置）与时长徽标重叠**：
+  - 现象：`ActivityCard` 悬停时右上角浮现的「在地图中查看」「交换位置」两个按钮（`absolute top-3 right-3`，h-7×2+gap≈64px 宽）直接盖住右列顶部的时长徽标（如「1小时」只露出末字），并紧压下方「必去/推荐」优先级徽标
+  - 原因：操作按钮与右列徽标（`durationText`、priority badge，`items-end` 顶对齐，占 top 16~70px）共用右上角同一区域，两者无布局隔离
+  - 修复：按钮容器移至 `bottom-3 right-3`（右下角）——右列徽标仅占卡片顶部，右下恒为空白区，最矮卡片（≈150px+）下按钮顶部 ≈114px 仍高于徽标底边 ≈70px，无重叠可能；左侧文本列在 flex 行中不越过右列宽度，运输提示行也不受干扰
+  - 文件：`frontend-new/src/components/timeline/ActivityCard.vue`（仅 class 调整）
+  - 说明：`TripCard` 同款 `top-3 right-3` 覆盖的是封面图（状态徽标/菜单无文本冲突），不属本问题，未改动
+
+### 验证方式与结果（2026-09-27）
+
+| 项 | 结果 |
+|---|---|
+| `npm run build`（vue-tsc 类型检查 + vite） | **通过** ✅ |
+| `robocopy dist → gateway static /MIR` + `mvn -o package -DskipTests` + 重启 | 8081-8086 全 UP ✅ |
+| 线上产物 `TripDetailPage-DDdwwQVj.js`：`bottom-3 right-3` ×2、`top-3 right-3` 残留 ×0 | ✅ |
+
+---
+
+## [1.16.2] - 2026-09-27
+
+### 修复
+
+- **fork 分支新行程被标记 `draft`，规划页会误触发重新规划**：
+  - 现象：`POST /api/trips/{id}/versions/{versionNum}/fork` 创建的新行程与新版本状态均为 `draft`；打开 `PlanningPage` 时第 51 行（仅认 `planned`/`completed`）不命中，逻辑落到第 96 行 `triggerNewPlan()`，对已带完整活动副本的分支行程**重新发起一次 AI 规划**，违背 fork 意图；Dashboard 亦显示为「草稿」
+  - 原因：`TripVersionService.forkFromVersion` 硬编码 `setStatus("draft")`（行程、版本各一处），而同文件 `rollbackToVersion` 复制完整行程时设的是 `completed`——同一语义（副本即成品）两种状态，fork 属遗漏
+  - 修复：`forkFromVersion` 行程与版本状态均改为 `completed`，与回滚路径对齐
+  - 文件：`trip-service/src/main/java/com/tripplanner/trip/service/TripVersionService.java`
+
+### 背景说明
+
+- 本次修复由 1.16.1 修复 `getVersionByNum` 后**首次 E2E 走通** `rollback`/`fork` 两路径时发现（此前两接口被 404 挡死，逻辑从未实际执行过）
+
+### 验证方式与结果（2026-09-27）
+
+| 项 | 结果 |
+|---|---|
+| `verify-rollback.js`（版本详情 by num / 回滚到 v1 / fork→清理，共 17 断言） | **17/17 PASS** ✅ |
+| 其中关键断言：回滚版 6 活动+slogan、currentVersionId 指向新版本、内部版本详情读回滚版、fork 新行程 `status=completed`、fork 版本 6 活动、404 兜底 | 全部通过 ✅ |
+| `verify-d.js` D 类回归（重建后复跑） | **22/22 PASS** ✅ |
+| `mvn -o test -pl common-module,trip-service` | **34/34 通过** ✅ |
+| 数据清理：删除本轮重复回滚产物 v9（孤儿版本），测试行程保留 v1/v3/v6/v7/v8/v10 | ✅ |
+
+---
+
+## [1.16.1] - 2026-09-27
+
+### 修复
+
+- **按版本号获取版本详情永远 404（详情/回滚/分支三个接口全挂）**：
+  - 现象：`GET /api/trips/{id}/versions/{versionNum}` 返回 `404 版本不存在: 1`，该 trip 明明存在 v1；`rollback`、`fork` 走同一查找逻辑，一并失效
+  - 原因：`TripVersionController.findVersionIdByNum` 把版本号当主键查——`versionService.getVersion(tripId, versionNum + "")` 传入 `"1"` 当 versionId → `findById("1")` 命中不到 → 抛 notFound（代码注释自认「这里简化，实际需要按 versionNum 查询」）
+  - 修复：`TripVersionService` 新增 `getVersionByNum(tripId, versionNum)`（走已有 `TripVersionRepository.findByTripIdAndVersionNum`，未命中抛 `notFound("版本", "v"+num)`）；控制器三处调用点（getVersion/rollback/fork）改为直调该方法，删除有缺陷的辅助方法，同时消除原来的二次查询
+  - 文件：`trip-service/.../controller/TripVersionController.java`、`trip-service/.../service/TripVersionService.java`
+
+### 同轮变更（测试补齐 + 数据清理）
+
+- **补齐仓库缺失的单元测试**（此前 0 个测试）：
+  - 新增 `SloganServiceTest`（19 用例）：词库精确/模糊/餐次前缀匹配、同 seed 稳定性、多签轮换、单签与无 seed 确定性、最长关键词特征模板（青岛老城区/小鱼山公园回归用例）、餐饮模板、类型兜底、`isGeneric` 九类判定
+  - 新增 `CityOwnershipUtilsTest`（15 用例）：无城市词返回 null（禁默认北京回归）、路名误判（广州北京路）、景点反查、归属校验、跨城过滤 visitTotal 语义、overwhelmed 判定
+  - `common-module/pom.xml` 补 `spring-boot-starter-test`（test scope）
+- **清理测试产生的坏数据**：删除 trip `01bda8f8…` 的 3 个空活动版本（v2/v4/v5，历史轮次求解失败仍被标记 completed，会误导版本切换 UI）；全库 `JSON_LENGTH(activities)=0` 现为 0
+
+### 验证方式与结果（2026-09-27）
+
+| 项 | 结果 |
+|---|---|
+| `mvn -o test -pl common-module,trip-service` | **34/34 通过**（Slogan 19 + CityOwnership 15）✅ |
+| `verify-d.js` D 类 API 全链路（摘要卡/评分人均地址/签名/交通/分享/版本详情） | **22/22 PASS** ✅ |
+| 版本详情 `GET …/versions/1` | 由 404 → 200，v1 保留 6 活动且 slogan 全量生成 ✅ |
+| 分享读路径 `GET /api/trips/shared/{token}` | 200，slogan 正常（读路径同走 `toResponse`）✅ |
+| 卡死 `planning` 版本计数 | 0 ✅ |
+
+---
+
+
+（与 `docs/CHANGELOG.md` 同版本：以景点签名功能增强为主，同时修复其长期失效的缺陷。）
+
+### 修复
+
+- **景点词库签名从未生效，前端 slogan 全是 LLM 泛化 notes**：
+  - 现象：行程详情里西湖显示「游览西湖」、灵隐寺显示「参观灵隐寺」、雷峰塔直接显示「雷峰塔」，词库中「淡妆浓抹总相宜」等约 185 条景点签名从未出现
+  - 原因：`TripService` 创建行程时把 LLM 的 `notes` 拷贝为 `slogan`（TripService.java:163/:554），而 `TripVersionService.toResponse` 只在 slogan **为空**时才回填词库 —— 非空的泛化 notes 把词库永久挡住；且词库为单条静态映射，无个性化可言
+  - 修复：`toResponse` 改为「缺失**或泛化**则按景点重新生成」，泛化判定 `SloganService.isGeneric` 区分「游览西湖/漫步/观海景」（换）与「骑行古城墙/张生记，一城风味落座」（保留）；多签轮换 seed 取 `tripId`
+  - 文件：`trip-service/.../service/{SloganService,TripVersionService}.java`
+
+- **特征模板关键词误判**：
+  - 「青岛老城区」因含「岛」命中海岛组出「海风翻过青岛老城区」、「小鱼山公园」因含「山」命中山岳组出「山高人为峰」
+  - 修复：改为**最长关键词优先**匹配（「老城」「公园」胜过「岛」「山」），海岛模板措辞改为「{name}，海风正好」避免「海风翻过海边」类病句
+  - 文件：`trip-service/.../service/SloganService.java`
+
+### 验证方式与结果（2026-09-26）
+
+`node slogan-check.js`（打 gateway API）：4 个行程 21 条活动全部输出景点专属签名；同行程两次请求 100% 一致；跨行程同景点出不同签；原泛化文案（游览西湖/漫步/观海景/逛老街/了解啤酒文化）全部消除。详细表格见 CHANGELOG 同版本条目。
+
+---
+
+
+（与 `docs/CHANGELOG.md` 同版本：本轮以功能增强为主、同时修复实现过程中的缺陷，两文件条目对齐。）
+
+### 修复
+
+- **反馈重规划「求解全灭 / 版本空 activities / 卡 planning」系列缺陷**（核心根因链）：
+  - `HeuristicSolver.tryInsertBest` 可行性判定双重减时长：`feasibleEnd = min(latestMin - preferred, nextStart - travel)`，精确贴合时间窗的活动被判不可行 → `scheduledCount=0` → 落库 0 活动。修复：`latestStart` 与 `endLimit` 分开判断
+  - `loadBaseProblem`/`doPersist` 时间窗按 tripStart 时刻对齐会压缩可用窗口。修复：统一锚定 **day1 00:00**，`endMin = max(spanDays*1440, maxActivity.latestMin+60)`
+  - 子问题矩阵按列表下标索引而基础版本 `seq` 为 1..n → `ArrayIndexOutOfBoundsException: Index 5 out of bounds for length 5`。修复：`buildSubProblem` 排序后重编 `seq=0..n-1` 并按重编列表重建矩阵；`mergeSolutions` 改按 **id** 匹配固定活动（对象身份因重编 seq 不再成立）
+  - `MODIFY_DURATION` 延长时长未放宽最新结束时刻/下游时间窗 → 延长超窗活动被丢弃。修复：`applyDurationChange` 按 delta 顺延本活动 `latestMin`，下游受影响活动 earliest/latest 同步顺延
+  - `parseFeedback` 此前在 baseProblem 未加载时调用致 NPE。修复：先 `loadBaseProblem` 再解析；矩阵为 null 时按城市调用 `geocodeClient.getDistanceMatrix` 兜底
+  - 持久化坐标顺序颠倒（`lat=经度`）与 `poiAddress` 默认值写成字符串 `"poiAddress"`。修复：`{lat,lng}` 顺序纠正、`pickStr(..., "")` 空默认
+  - 文件：`planning-worker/.../solver/{HeuristicSolver,IncrementalReplanner}.java`、`service/{PlanningOrchestrator,ResultPersistService}.java`、`consumer/ReplanJobConsumer.java`
+
+- **跨城污染：无城市词时默认按北京处理**：
+  - 原 `extractCity` 匹配失败返回「北京」，导致海边/青岛文本生成北京系景点。修复：删除默认兜底返回空串，城市来源显式标注 `citySource`，`RouteService` 城市为空回退 `drive`
+  - 文件：`plan-service/.../util/CityOwnershipUtils.java`、`plan-service/.../service/RouteService.java`
+
+- **餐厅评分链路缺失**（评分/人均/地址全空）：`TripService` 未透传 `rating`/`cost`、活动行未写 `poi_address`。修复见 CHANGELOG A 条与 `ResultPersistService.toActivityMap`
+- **测试数据遗留**：历史轮次失败留下的 `status=planning` 卡死版本（v3/v6）SQL 置为 `failed`，当前 `planning` 计数 0
+
+### 验证方式与结果（2026-09-26）
+
+全量 E2E `verify.js`（3 个新行程 + 1 次重规划）+ `verify2.js` 复测：重规划 `changes=REMOVE:act3,MODIFY_DURATION:act1`，最终版本 5 活动（灵隐寺已删、西湖 180 分钟），`visitTotal=3`、无坐标 0、trip `completed`；服务日志无 NPE/AIOOBE。部署链同 CHANGELOG。
+
+---
+
+
+### 修复
+
+- **登录/注册错误横幅把页面撑坏（图标巨大、文字竖排、表单像「缺失」）**：
+  - 现象：提交失败后错误横幅内出现一个占满宽度的红色感叹号圆图，右侧「邮箱或密码错误」被挤成一列竖字，横幅高达数百像素，把下方按钮/其它字段顶出可视区
+  - 原因：横幅图标 class 写了 `h-4.5 w-4.5`，**Tailwind 3.4 默认间距刻度里没有 4.5**，类不生成 → `<svg>` 无尺寸约束，配合 `shrink-0` 占满容器
+  - 修复：改为 `h-4 w-4 mt-0.5 shrink-0`，文字容器加 `flex-1 min-w-0 break-words`、横幅加 `leading-snug`（两处：登录/注册）
+  - 文件：`frontend-new/src/views/AuthPage.vue`
+
+- **注册页密码规则提示触发 vue-i18n 编译错误（文案可能显示异常）**：
+  - 现象：控制台反复出现 `Message compilation error: Invalid linked format` / `Unexpected empty linked key`
+  - 原因：`auth.passwordHint` 文案里直接写了 `(@$!%*?&)`，`@` 是 vue-i18n **linked message 语法**，`$!%*?&）` 又被当成非法 token，整条消息编译失败
+  - 修复：用 i18n 字面量写法 `{'@$!%*?&'}` 包裹特殊字符（中英文两份都改）
+  - 文件：`frontend-new/src/i18n/zh-CN.json`、`frontend-new/src/i18n/en-US.json`
+
+- **过期 token 导致「注册页打不开 / 无法注册」**：
+  - 现象：`/register` 打开后被立刻重定向到 `/dashboard`，或反之无法回到登录/注册页
+  - 原因：路由守卫只用 `localStorage` 里 **token 是否存在** 判断登录态，不校验过期时间；残留的过期 token 会让 `meta.guest` 页面一律跳走（日志里可见浏览器曾用失效 token 请求 `/api/auth/refresh` → `REFRESH_TOKEN_REVOKED`）
+  - 修复：新增 `isTokenAlive()` 解析 JWT `exp`（容错 5 秒，非 JWT 视为有效），过期即清除 `tf_token`/`tf_refresh`；守卫按「有效 token」判断 `requiresAuth` / `guest`
+  - 文件：`frontend-new/src/router/index.ts`
+
+### 验证结果（2026-09-26）
+
+| 验证项 | 结果 | 说明 |
+|--------|------|------|
+| Vue SSR 渲染 `/login` | PASS | 3 个 input（邮箱/密码/记住我）、提交按钮、邮箱 label 齐全 |
+| Vue SSR 渲染 `/register` | PASS | **4 个 input**、用户名/邮箱/密码/确认密码 label 齐全、密码规则提示存在、1 个提交按钮；**无 `Message compilation error`**（修复前必现） |
+| 构建产物 CSS | PASS | 含 `.h-4{}`、`.break-words`、`.bg-danger-50`，**不含 `h-4.5`** |
+| `npm run typecheck` / `npm run build` | PASS | vue-tsc 0 错误；产物 `index-DPUia3nK.js` + `AuthPage-CjArL8EP.js` |
+| `robocopy` + `start-all.ps1 -Action restart -Build` | PASS | exit=3 / 6 服务全部 UP |
+| 网关首页 | 200 | 返回 `assets/index-DPUia3nK.js`（新包已进 jar） |
+| 新包横幅类名 | PASS | 网关上的 `AuthPage-CjArL8EP.js` 含 `h-4 w-4 mt-0.5 shrink-0` |
+| `POST /api/auth/register`（全新邮箱） | PASS | 200，返回 accessToken |
+| 紧接着 `POST /api/auth/login`（新账号） | PASS | 200 |
+| 弱密码注册 | PASS | 400 `details.password="密码必须包含大小写字母、数字和特殊字符"` |
+
+## [1.14.4] - 2026-09-26
+
+### 修复
+
+- **无法注册账号（注册必返 500「服务器内部错误」）**：
+  - 现象：`POST /api/auth/register` 只要通过参数校验就返回 `500 INTERNAL_ERROR`，新用户永远注册不上；登录 / 邮箱重复 / 密码不一致等失败场景返回正常
+  - 原因：本机 `trip_planner` 库的 `user_preferences` 表是**旧版 DDL 建的**，只有 `transport_mode / budget_level / pace / created_at` 等老列，缺少 `intensity / dietary_tags / accessibility / home_location / work_location / preferred_transport_modes`（及实体的 `version`）。`UserService.register` 在事务内调用 `UserPreferenceService.initDefaultPreference`，MyBatis 插入带 `intensity` 报 `SQLSyntaxErrorException: Unknown column 'intensity' in 'field list'`，整事务回滚 → 500
+  - 附带发现：同一漂移下 `planning_tasks` 表在本机库**从未创建**（plan-service 的 `GET /api/plan/tasks/{id}`、`GET /api/plan/trips/{id}/tasks` 会 1146 报错），`init-sql/01_schema.sql` 里有定义但线上库没有
+  - 修复：
+    1. 新增迁移脚本 `init-sql/04_migration_20260926.sql`（由 `01_schema.sql` 的 DDL 提取生成）：`CREATE TABLE IF NOT EXISTS planning_tasks`（3 个外键 + 4 个索引）+ 7 条 `ALTER TABLE user_preferences ADD COLUMN ...`
+    2. 已对本机 `trip_planner` 执行该脚本（exit=0），列/表结构复核通过
+    3. `pois / audit_logs / system_configs` 经全局检索**无任何 Java 代码引用**，本轮不建（避免引入未使用对象）
+  - 文件：`init-sql/04_migration_20260926.sql`（新增）
+
+- **登录/注册失败时提示丢失或显示异常**：
+  - 现象：输错密码本应提示「邮箱或密码错误」，但页面可能整页刷新跳回 `/login`（Toast 被刷掉）；断网/超时显示英文 `Network Error` 或空白
+  - 原因：
+    1. `api/index.ts` 响应拦截器对**所有 401** 都走「刷新 Token → 失败则 `window.location.href='/login'`」，而登录/注册接口的 401 是业务失败（`INVALID_CREDENTIALS`、`EMAIL_ALREADY_EXISTS`、`PASSWORD_MISMATCH`）
+    2. 错误只提取了 `error.message`，没提取字段级 `error.details`；网络错误、超时（`ECONNABORTED`）、无 body 的 4xx/5xx 没有兜底文案
+    3. Token 刷新**成功**时，排队请求被 `processQueue(null)` 以 `null` reject，调用方拿到非 Error 对象
+  - 修复（`frontend-new/src/api/index.ts`）：
+    - 新增 `ApiError`（`message/code/status/details`）与 `toApiError()`，所有失败统一归一化：网络错误→「网络异常，请检查网络连接后重试」、超时→「请求超时，请重试」，400/401/403/404/409/429/5xx 均有中文兜底文案
+    - 认证类请求（`/api/auth/(login|register|refresh|logout)`）的 401 **不再**触发 Token 刷新与强制跳转
+    - `processQueue` 刷新成功改为 resolve 放行（排队请求按原逻辑重试），失败 reject 归一化后的 `ApiError`
+  - 文件：`frontend-new/src/api/index.ts`
+
+### 增强（同步登记于 `docs/CHANGELOG.md`，版本号一致）
+
+- **登录/注册失败可见、可定位**（`frontend-new/src/views/AuthPage.vue`）：
+  - 新增表单级错误横幅（提交按钮上方），显示后端 `message` 或网络/超时兜底文案，Toast 同步提示
+  - 字段级校验错误：把 `error.details` 回填到对应输入框（邮箱格式、密码规则、两次密码不一致等直接标红在输入框下）
+  - 注册密码前端校验对齐后端 `RegisterRequest` 规则（8-72 位、大小写+数字+特殊字符 `@$!%*?&`），输入框下方常显密码规则提示；登录不再用「至少6个字符」拦截（后端仅要求非空）
+  - 输入即清除该字段错误与横幅，切 Tab 时重置
+- **i18n 文案**：`zh-CN.json` / `en-US.json` 新增 `auth.passwordHint`、`auth.loginFailed`、`auth.registerFailed`
+
+### 验证结果（2026-09-26）
+
+| 验证项 | 结果 | 说明 |
+|--------|------|------|
+| 执行 `init-sql/04_migration_20260926.sql` | PASS | exit=0；`user_preferences` 现 17 列（新增 `intensity` 等 6 列 + `version`）、`planning_tasks` 含 3 外键 + 4 索引 |
+| `POST /api/auth/register`（新邮箱，密码 `Test123456@`） | PASS | **200**，返回 accessToken/userId（修复前 500） |
+| 重复邮箱注册 | PASS | 401 `EMAIL_ALREADY_EXISTS`「邮箱已被注册」 |
+| 非法邮箱注册 / 登录 | PASS | 400 `VALIDATION_ERROR`，`details.email="邮箱格式不正确"` |
+| 弱密码注册 | PASS | 400，`details.password="密码必须包含大小写字母、数字和特殊字符"` |
+| 两次密码不一致 | PASS | 401 `PASSWORD_MISMATCH`「两次输入的密码不一致」 |
+| 密码错误登录 / 不存在邮箱登录 | PASS | 401 `INVALID_CREDENTIALS`「邮箱或密码错误」（归一化为 ApiError，不再触发刷新跳转） |
+| 正常登录 | PASS | 200，`admin@tripplanner.com` 拿到 token |
+| `GET /api/plan/trips/{id}/tasks`（经 8086） | PASS | 200 空数组（建表前会 1146） |
+| `npm run typecheck` / `npm run build` | PASS | vue-tsc 0 错误；产物 `assets/index-4MXxMLi4.js` |
+| `robocopy dist → gateway/static /MIR` | PASS | exit=3；static `index.html` 指向 `index-4MXxMLi4.js` |
+| `start-all.ps1 -Action restart -Build -NoBrowser` | PASS | 停 → 打包 → 起 → 6 服务全部 UP |
+| 网关首页 | 200 | 返回 `assets/index-4MXxMLi4.js`（新前端已进 gateway jar） |
+| 重启后 auth-service 日志 | PASS | `ERROR` / `Unknown column` 均为 0 条 |
+
+## [1.14.3] - 2026-09-26
+
+### 修复
+
+- **没有可靠的一键启动方式（旧 `run.bat` / `restart-all.ps1` 启动即坏）**：
+  - 现象：想启动整个项目只能逐个拼命令，或用旧脚本启动后 AI 规划不可用、中文日志乱码、关掉控制台服务跟着被杀
+  - 原因：
+    1. `run.bat` 只设了 `AMAP_API_KEY`，**没传 LLM Key**（plan-service 规划必挂）、没设 UTF-8 编码、服务工作目录在项目根而非各自模块、jar 缺失时不提示构建方式
+    2. `restart-all.ps1` 用 `Start-Process cmd /c …` 起进程，父控制台一关（或 Ctrl+C）子进程全灭；日志写死为模块内 `stdout.log`，且无 `-Dlogging.file.name`，stdout 被块缓冲经常是空的
+    3. `stop.bat` 是 `taskkill /IM java.exe /F`，会把机器上**所有** Java 程序一起杀掉
+  - 修复：新增统一启动脚本
+    - `start-all.ps1`：`-Action start|stop|restart|status`，`-Build`（构建后端）、`-BuildFrontend`（前端构建并同步 gateway static）、`-NoBrowser`、`-SkipInfra`、`-WaitSeconds`
+      - 基础设施自检：Windows 服务 `MySQL80`/`Redis` 未运行则拉起，检查 :3306/:6379；Docker 缺 `zookeeper`/`kafka` 时 `docker compose up -d mysql redis zookeeper kafka` 并等 :9092
+      - jar 缺失自动构建；构建顺序固定 **先前端 → robocopy 同步 static → 再打包后端**（新静态资源才会进 gateway jar），且**构建前会先停掉本项目服务**（否则 jar 被 JVM 占用报 `Unable to rename *.jar`）；Maven 查找顺序：`MVN_CMD` → PATH `mvn.cmd` → 递归搜 `~/.m2/wrapper/dists/**/mvn.cmd` → `.mvn/wrapper/maven-wrapper.jar`
+      - 启动：只杀**本项目**的 Java 进程（命令行含项目根路径且带 `-jar`），逐服务 `Start-Process -WorkingDirectory <模块> -WindowStyle Hidden` 独立进程（脱离当前控制台，关窗口服务不掉）
+      - 每个服务注入 `-Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8 -Damap.api-key=…`，plan-service 额外注入 `-DLLM_API_KEY`/`-DZHIPU_API_KEY`，并注入 `-Dlogging.file.name=logs\<服务名>-spring.log`（**必须在 `-jar` 之前**，否则被当成程序参数）
+      - 健康轮询（`/actuator/health`，回退 `/`，最多 150s）后输出状态表与 URL，日志集中在 `logs\`
+    - `start.bat`：双击即可启动（参数透传给 ps1）
+    - `run.bat` 改为转发到 `start-all.ps1`（保留原入口，不再走旧的坏逻辑）；`stop.bat` 改为 `-Action stop`，只停本项目进程
+    - **联调中修掉的 4 个实现坑**（均在首次实跑时暴露）：
+      1. `robocopy /NJW` 在本机是**无效参数**（报 `无效参数 #8: "/NJW"` 并以 exit=16 失败）→ 去掉 `/NJW`
+      2. Maven 路径探测只递归了 2 层，而真实结构是 `dists/<dist>/<hash>/apache-maven-x.y.z/bin/mvn.cmd`（3 层）→ 改为 `-Recurse -Filter mvn.cmd`
+      3. PowerShell 调 wrapper 时 `-Dmaven.multiModuleProjectDirectory=$Root` 未加引号被拆参，报 `ClassNotFoundException: /multiModuleProjectDirectory=…` → 整体加引号
+      4. `.bat` 里写中文 + 无 BOM 的 UTF-8 会被 cmd 按 GBK 解析，把中文字节里的 `|`/`&` 当命令分隔符（执行时冒出 `xxx 不是内部或外部命令`）→ 三个 `.bat` 改为纯英文，中文只留在带 BOM 的 `start-all.ps1` 里
+  - 文件：`start-all.ps1`（新增）、`start.bat`（新增）、`run.bat`、`stop.bat`
+
+- **planning-worker 启动后永远是 DOWN（历史遗留问题的根因）**：
+  - 现象：每次 `restart-all.ps1` 都报 `planning-worker: DOWN`，端口 8084 有监听但 `/actuator/health` 一直失败
+  - 原因：`planning-worker/src/main/resources/application.yml` 数据源默认值写成 `localhost:3307` + 用户 `trip_planner`（指向 Docker MySQL 且账号与 `.env` 不匹配），日志报 `Access denied for user 'trip_planner'@'172.19.0.1'`；其余 5 个服务默认都是本机 MySQL80 `3306` + `root`
+  - 修复：数据源默认值改为 `3306` + `root` / `12345678mxy`，与其余服务一致（仍可用 `MYSQL_*` 环境变量覆盖）
+  - 文件：`planning-worker/src/main/resources/application.yml`
+
+### 验证结果（2026-09-26）
+
+| 验证项 | 结果 | 说明 |
+|--------|------|------|
+| `start-all.ps1 -Action start -NoBrowser` | PASS | 全流程 41 秒，6 个服务全部 UP，exit=0 |
+| `start-all.ps1 -Action stop` | PASS | 精确停止 6 个本项目 Java 进程（PID 来自命令行匹配），`java` 进程归零，8081-8086 全部释放，不动其他 Java 程序 |
+| `start-all.ps1 -Action restart -NoBrowser` | PASS | 停→自检→起→健康检查 50 秒完成，exit=0 |
+| `start-all.ps1 -Action status` | PASS | 输出服务/端口/PID/状态表，全 UP 时 exit=0 |
+| `start-all.ps1 -Action restart -Build -BuildFrontend -NoBrowser`（完整部署链） | PASS | 停服务 → `npm run build` → `robocopy /MIR` → `mvn -o package -DskipTests`（3.9.16）→ 基础设施自检 → 启动 → 健康检查，65 秒，exit=0；验证了“构建前先停服务”与“前端先于后端打包” |
+| `run.bat -Action status`（bat 转发链） | PASS | cmd → ps1 → 中文状态表正常输出，exit=0（.bat 已改纯英文，GBK/UTF-8 解析冲突消除） |
+| `/actuator/health` ×6 | PASS | 8081-8086 全部 `200 {"status":"UP"}`，**planning-worker 的 db 组件 UP**（修复前一直 DOWN） |
+| 网关首页 | 200 | `assets/index-DaE5TCaw.js` |
+| 登录 + 行程列表 | PASS | `POST /api/auth/login` 200 拿到 token；`GET /api/trips` total=145 |
+| plan-service 进程参数 | PASS | 命令行含 `-DLLM_API_KEY`、`-Damap.api-key`、`-Dlogging.file.name`（均位于 `-jar` 之前） |
+| 中文输出编码 | PASS | 脚本存为 UTF-8 with BOM，PowerShell 5.1 解析中文正常（无乱码） |
+| 日志 | PASS | 集中在 `logs\<服务名>-spring.log` / `.log` / `.err.log` |
+
+---
+
+## [1.14.2] - 2026-09-25
+
+### 修复
+
+- **地图上的地标（景点/POI marker）不全、有缺失**：
+  - 现象：行程地图上部分景点没有定位点，列表里有、地图上看不到
+  - 原因（三重叠加）：
+    1. **高德 Key 没注入**：plan-service 当前由 `run.bat` 以 `java -jar …--server.port=808N` 启动，命令行**没有** `-Damap.api-key`（只有 `restart-all.ps1` 传了），`amap.api-key` 为空 → 所有高德调用返回 `INVALID_USER_KEY` → 批量地理编码全挂 → 活动 `lat/lng` 为空，`TripMap.addMarkers` 对空坐标直接跳过
+    2. **并发打爆 QPS**：`GeocodeService.batchGeocode` 用 `parallelStream` 并发请求，高德免费版地理编码 QPS=3，整批返回 `CUQPS_HAS_EXCEEDED_LIMIT`（实测 15 词连查仅第 1 批部分成功）
+    3. **地址型接口命中率低**：`/geocode/geo` 面向结构化地址，纯景点名常返回 `ENGINE_RESPONSE_DATA_ERROR`
+  - 修复：
+    1. `run.bat` 注入 `set AMAP_API_KEY=…`（已同时 `setx` 持久化环境变量），保证任何启动方式都带 Key
+    2. `GeocodeService`：新增全局限速 `throttleAmap()`（350ms 间隔 ≈ 3 QPS），`callAmapGeocode` / `callAmapRegeocode` 发请求前排队；`batchGeocode` 改为**串行**并保持顺序，遇限流错误退避 1.2s 重试一次（失败不进缓存，可安全重查）
+    3. `GeocodeService` 新增 **POI 搜索兜底** `callAmapPlace()`（`/place/text` + `citylimit=true`），地址型 geocode 失败时按景点名取精确坐标，位于「内置坐标表兜底」之前
+    4. `RouteService`：`batchRoute` 改串行 + 200ms 限速，避免路径规划接口并发超限导致路程数据拿不到
+    5. 前端兜底：`TripMap.vue` 新增 `fillMissingCoordsByPlace()`，对仍无坐标的活动用浏览器端 `AMap.PlaceSearch`（script plugin 补加载 `AMap.PlaceSearch`）补坐标后刷新 marker/连线；`onMounted`、`activities` watch、`city` watch 三处触发，聚焦期间不抢视野
+  - 文件：`run.bat`、`plan-service/src/main/java/com/tripplanner/plan/service/GeocodeService.java`、`…/service/RouteService.java`、`frontend-new/src/components/map/TripMap.vue`
+
+- **两个地点之间显示「0分钟」**：
+  - 现象：同一天相邻活动之间的交通时长为 0（老数据 236 对里 13 对，模式集中在「餐次 → 下一个活动」）
+  - 原因：
+    1. LLM prompt 的示例自己写了「午餐 → 王府井 `travelTimeMin: 0`」，模型照抄 0
+    2. 活动坐标缺失 → `correctActivitiesWithRealData` 的真实路网修正拿不到起终点被跳过
+    3. 前端只透传 `travel_duration_min`，后端为 0 就显示 0
+  - 修复：
+    1. `TripPlanningAgent` prompt 新增硬规则：**同天相邻 `travelTimeMin` 必须 > 0，仅当天最后一个活动可为 0**；示例改为 `walk / 12min / 0.9km`、`walk / 8min / 0.6km`
+    2. `TripPlanningAgent` 新增 `fillZeroTravelTimes()`：坐标齐时按直线距离 ×1.35 绕行 + 交通方式时速（drive 25 / transit 18 / bike 15 / walk 4.5 km/h，clamp 3~240min）回写 `travelTimeMin` / `transportToNext` / `travelDistanceKm`，跨天与当天末段保持 0
+    3. 前端估算兜底：`utils/activity.ts` 新增 `activityCoord()` / `haversineMeters()` / `estimateTravelMinutes()` / `effectiveTravelMinutes()`，`DayTimeline.vue` 计算 `travelToNext()` 传给 `ActivityCard`（新增 `travelMin` prop）与 `TransitConnector`，后端为 0 时按直线距离估算展示；`normalizeActivity` 同步补 `travelDistanceMeters`
+  - 文件：`plan-service/src/main/java/com/tripplanner/plan/agent/TripPlanningAgent.java`、`frontend-new/src/utils/activity.ts`、`frontend-new/src/components/timeline/DayTimeline.vue`、`frontend-new/src/components/timeline/ActivityCard.vue`
+
+### 验证结果（2026-09-25）
+
+| 验证项 | 结果 | 说明 |
+|--------|------|------|
+| `POST /api/plan/batch-geocode`（哈尔滨/杭州/大理 × 5 词，15 次） | PASS | 15/15 返回真实坐标，无 `INVALID_USER_KEY`、无 `CUQPS_HAS_EXCEEDED_LIMIT`（修复前：整批失败或超限） |
+| `POST /api/plan/map/route`（步行 1.1km） | PASS | `distance=1092m`、`duration=874s`、polyline 正常返回 |
+| E2E 中文规划（trip `3438eccb5bc14732a863ce1d101fdc3f`，杭州两日） | PASS | `city=杭州`、landmarks 正确；**14/14 活动有坐标**；同天相邻 12 段中 **0 段为 0 分钟**（0 值仅出现在当天最后一项，符合设计） |
+| E2E 英文对照（trip `26e455b9ed73489aa6d0b34e6cf18da5`） | PASS | 12/12 有坐标；同天 10 段仅 2 段为 0 且均为当天末项 |
+| `npm run typecheck`（vue-tsc） | PASS | EXIT=0 |
+| `npm run build` + `robocopy dist → gateway/static /MIR` | PASS | 产物 `index-DaE5TCaw.js`；chunk 内含 `AMap.PlaceSearch`、`citylimit`（地图补坐标兜底已随包） |
+| `mvn -o package -DskipTests` + `restart-all.ps1` | PASS | MVN_EXIT=0；auth/trip/plan/notification/gateway UP（worker DOWN 为已知遗留） |
+| 网关 `/` | 200 | 引用 `assets/index-DaE5TCaw.js`，与本次构建一致 |
+
+---
+
+## [1.14.1] - 2026-09-25
+
+### 修复
+
+- **退出登录无效（点「退出登录」仍停在登录后的页面）**：
+  - 现象：导航栏头像下拉菜单与移动端侧边栏的「退出登录」点击后无效果，刷新页面依然是登录态
+  - 原因：两处退出逻辑删除的是 `localStorage` 的 `accessToken` / `refreshToken`，而本应用真实 token 键是 **`tf_token` / `tf_refresh`**；同时没有清 Pinia `auth` store。结果 `router.push('/login')` 触发路由守卫 `to.meta.guest && token` → 立刻被重定向回 `/dashboard`，表现为“退不出去”
+  - 修复：改为调用 `authStore.logout()`（内部调用 `POST /api/auth/logout`、清空 store、删除 `tf_token`/`tf_refresh`），再 `router.push('/login')`，并同步关闭下拉/侧边栏
+  - 文件：`frontend-new/src/components/layout/AppNavbar.vue`（`handleLogout`）、`frontend-new/src/components/layout/AppSidebar.vue`（`handleLogout`）
+
+- **个人中心 Tab 指示条（下划线）跑到页面左侧，出现版式偏移**：
+  - 现象：`/profile` 页 Tab 行下方的蓝色渐变指示条脱离卡片，悬浮在页面左侧空白处（约 x≈100、y≈Tab 行高度），卡片内容整体观感错位
+  - 原因：`UITabs.vue` 指示条是 `absolute`，但组件根节点 `<div class="border-b …">` **没有 `relative`**，其定位上下文逃逸到更外层祖先；而 `left` 是按 `<nav>`（真正 `position: relative` 的元素）算的相对偏移，两套坐标系不一致 → 指示条以 `left≈90px` 落在页面级包含块上；`top` 未设置走静态位置，正好贴在 Tab 行下边框高度
+  - 修复：
+    1. 根节点加 `relative`，并新增 `rootRef`，`left` 改为相对**组件根节点**计算（`elRect.left - rootRect.left`）
+    2. 指示条补 `bottom-0`，稳定贴合 Tab 行下边框
+    3. 监听 `window.resize` 并在 `onUnmounted` 移除，避免窗口缩放后指示条错位
+  - 文件：`frontend-new/src/components/ui/UITabs.vue`
+
+### 验证结果（2026-09-25）
+
+| 验证项 | 结果 | 说明 |
+|--------|------|------|
+| `npm run typecheck`（vue-tsc） | PASS | EXIT=0 |
+| `npm run build` | PASS | 16.00s，`index-mjsKU74v.js` |
+| `robocopy dist → gateway/static /MIR` | PASS | exit=3 |
+| `mvn -o package -DskipTests` | PASS | MVN_EXIT=0（重打包 gateway 静态资源） |
+| `restart-all.ps1` | PASS | auth/trip/plan/notification/gateway UP（worker DOWN 为已知遗留） |
+| 网关 `/` | 200 | 引用 `assets/index-mjsKU74v.js`，与本次构建产物一致 |
+| 旧退出逻辑已消失 | PASS | 全量静态 chunk 中 `removeItem("accessToken")` 出现 **0** 次 |
+| Tab 指示条新逻辑随包可见 | PASS | `ProfilePage-CYdi-xXo.js` 含 `bottom-0 h-0.5` 指示条类 |
+| 后端退出接口 | PASS | `POST /api/auth/logout`（带有效 token）→ 200 `{"success":true}` |
+| 封面图功能未回归 | PASS | chunk 中仍含 `/api/trips/covers` |
+
+---
+
+## [1.12.1] - 2026-09-25
+
+### 修复
+
+- **页面无法选择活动频率（创建页看不到频率选择器）**：
+  - 问题：活动频率功能（1.12.0）后端与前端源码均已就绪，但用户在创建页“无法选择频率”，页面上根本没有该区块
+  - 原因：`frontend-new/dist` 与 `gateway/src/main/resources/static` 仍是 09:56 的旧构建产物，而频率选择器是此后才写入源码；gateway 从 jar 内 `classpath:/static` 提供静态资源，源码改动不会自动生效
+  - 修复：
+    1. `cd frontend-new && npm run build`（`vue-tsc --noEmit` + vite）
+    2. `robocopy frontend-new\dist gateway\src\main\resources\static /MIR`（镜像同步，剔除旧 hash 文件）
+    3. `mvn -o package -DskipTests` 重打包 gateway
+    4. `powershell -ExecutionPolicy Bypass -File restart-all.ps1` 重启服务
+  - 文件：`frontend-new/dist/**`、`gateway/src/main/resources/static/**`
+  - 验证：网关 `GET /` 返回 200 且引用 `assets/index-Cy0ib_yl.js`；index chunk 含 i18n 文案 `活动频率`、`8~10 小时/天`；`GET /assets/TripCreatePage-CYzmv36z.js` 含三档枚举与 `pace` 提交字段
+  - 预防：见 `AGENTS.md §8.3`——功能改动完成后必须同步重建并部署前端产物，且当场登记版本号
+
+---
+
+## [1.12.0] - 2026-09-25
+
+### 修复
+
+- **紧凑档每日游览时长达不到下限（E2E 反复 FAIL，实测 335~439 分钟 / 目标 480 分钟）**：
+  - 现象：`pace=compact` 行程每日游览时长仅 5.6~7.3h，且 `visits` 常低于 4
+  - 原因（叠加 4 条）：
+    1. 缺口填充按“空窗 − 固定缓冲”插入，未计入**真实路程**，插入后被 `fixTimeOverlaps` 顺延推过 21:00，整条活动被裁掉（日志 `时间顺延裁剪超出 21:00 的活动: N 个`）
+    2. 顺延只会**向后推**，LLM 原本留下的空隙无法回收，导致尾部溢出
+    3. 真实时间定稿后仍留有空隙，但**没有第二轮补时**
+    4. 缺口填充放在 `dedupeVisitActivities` 之前时，补入的点会被同名/近似名去重吃掉（须置于去重之后）
+  - 修复：
+    - `fillDayGaps` 插入起点取 `max(缓冲, 上一活动 travelTimeMin + 5)`（trailing 窗 35 分钟），左右预留 30 分钟，宁可少补也不整条被裁
+    - 新增**阶段二「缺口延展」**：窗口装不下新活动时延长其前面的游览活动，预留 `max(30, travelTimeMin + 5)`，不新增交通、不推后结束时间
+    - 新增 **`pullDayLeft()`**：`fixTimeOverlaps` 处理溢出前先按真实路程整体前移当日活动（用餐不早于 7:30/11:30/17:30），把空隙挤出来
+    - 新增 **`refillPaceGaps()` 二次补时**（真实路网 + 人性化 + 21:00 顺延之后执行），以 `belowPaceFloor()` 判停、最多 3 轮，且在 `refillPaceGaps` 内部先 `fillPaceGaps` 再 `applyPaceBudget` → 再路网校正 → 再顺延
+    - `fillDayGaps` 明确放在 `dedupeVisitActivities` / `normalizeDailyMeals` 之后
+  - 文件：`plan-service/.../agent/TripPlanningAgent.java`
+  - 验证：`e2e-pace.js` 连续 3 轮全量 PASS（紧凑 7.6~8.3h、景点 4~6 个）
+
+- **LLM 收尾占位「结束(57)」被计为游览活动，虚增每日时长与景点数**：
+  - 问题：紧凑/适中档行程以 `19:33 结束(57)` 作为 visit 收尾，`visitMinutes`/`visitCount` 把它算进节奏指标，导致指标虚高且用户看到无意义活动
+  - 原因：`NON_PLACE_PHRASES` 未覆盖裸「结束」/「行程结束」
+  - 修复：列表扩充 `行程结束` / `结束行程` / `结束`，由既有 `replaceNonPlaceVisits()` 换成候选池真实地点或剔除
+  - 文件：`TripPlanningAgent.java` `NON_PLACE_PHRASES`
+
+- **宽松档某日游览时长超出上限（330 分钟 > 300 分钟）**：
+  - 问题：`relaxed` 行程 day2 = 4 景点 / 5.5h，超过 5 小时上限，景点数也超出 2~3 的标称区间
+  - 原因：`applyPaceBudget` 只裁“时长超限”，不裁“景点数超限”；且它在链路中段执行，后续补时轮次可能再次推高
+  - 修复：`applyPaceBudget` 循环条件改为 `(visitMinutes > maxMinutes || visitCount > maxVisits) && visitCount > minVisits`（仍不裁午晚餐、优先裁非 `must`）；主/回退路径**最终收口**再跑一次 `applyPaceBudget`
+  - 验证：日志 `活动频率预算 dayN: 游览 X 分钟 / Y 个景点, 上限 A 分钟 / B 个景点`；三档 E2E 景点数全部落在标称区间
+
+- **缺口填充反复“补了又被裁”的隐性死循环风险**：
+  - 问题：插入 → 路网校正 → 顺延 → 裁剪 → 再补，轮次之间可能互相抵消
+  - 修复：补时轮次以 `before/after` 对比判停（无提升即返回原列表），最多 3 轮；`fillDayGaps` 内部 `guard=12`、候选耗尽即 `return`；插入前先判断 `visitCount >= maxVisits` 转入延展分支
+  - 验证：`二次节奏补时: 每日游览 X -> Y 分钟` 日志仅出现 1~3 次/次规划，规划耗时仍为 52~96s
+
+---
+
+## [1.11.0] - 2026-09-25
+
+### 修复
+
+- **替换景点后时间不按真实路程顺延**：
+  - 问题：`POST /api/trips/{id}/replace` 把「灵隐寺」换成「雷峰塔」后，雷峰塔起点仍为 13:30，而上一活动 13:00 结束、真实路程 35 分钟，应为 13:35
+  - 原因：`AlternativeService.replaceActivity()` 只调用 `recomputeAdjacentTravel()` 更新路程字段，未把 `travelDuration` 加到后续活动的 `scheduled_start` 上
+  - 修复：新增 `resequenceDayByTravel(activities, activityIndex)`，替换后按天重排，`start_i ≥ end_{i-1} + travel_{i-1}`，并回写 `scheduled_start` / `scheduled_end`（存在 `startTime` / `endTime` 时同步）
+  - 文件：`trip-service/.../service/AlternativeService.java`
+  - 验证：日志 `替换后顺延: 1 雷峰塔 -> 13:35`；`e2e-distance.js` 输出 `RECALC_OK`
+
+- **行程时间未反映真实路程时间**：
+  - 问题：下一起点仅按 LLM 给的 `startTime` 排列，`start_i` 可早于 `end_{i-1} + travel_{i-1}`（实测 5 分钟违例）
+  - 原因：`fixTimeOverlaps()` 只做排序与 21:00 规则，未把上一活动的 `travelTimeMin` 计入最早可开始时间
+  - 修复：按天分组排序后推进，`earliest = prevEnd + max(0, prevTravel)`，`prevTravel` 取上一活动 `travelTimeMin`，只后推不前拉
+  - 文件：`plan-service/.../agent/TripPlanningAgent.java` `fixTimeOverlaps()`
+
+- **回退路径时间规则失效**：
+  - 问题：LLM 未生成全部天数时走回退路径，时间与去重规则表现不一致
+  - 原因：回退路径中 `fixTimeOverlaps` 排在清洗/去重之前，后续改写会覆盖已修正的时间
+  - 修复：回退路径顺序改为主路径一致，`fixTimeOverlaps` 固定为**最后一步**
+  - 同步修正：`replaceNonPlaceVisits` 挂在 `sanitizeActivityNames` 之后
+
+- **行程结束时间越过 21:00**：
+  - 问题：大理 4 日行程 day1 结束于 22:17（晚餐被推到 21:17-22:17）
+  - 原因：原逻辑只截断非用餐活动，用餐仅做 `latest = 21:00 - min(dur,60)` 尝试，当 `latest < prevEnd` 时直接放行，导致整条链被推向深夜
+  - 修复：`fixTimeOverlaps` 改为**迭代裁剪**——某活动结束晚于 21:00 时：先截断该活动（剩余 ≥15 分钟）；若是**用餐**被挤出 21:00，则剔除它前面最近的**非用餐**活动腾出时间保住正餐；仍装不下才剔除该活动。每轮必有进展（截断使 `end == 21:00`，或列表变短），循环必然终止
+  - 验证：日志 `时间顺延裁剪超出 21:00 的活动: 1 个`；4 日行程各天均 ≤21:00
+
+- **占位文本活动混入正式行程**：
+  - 问题：行程中出现「自由活动」「市区漫步」「返回酒店」「待定景点」等活动，既不可执行也无法地理编码
+  - 原因：LLM 在地点不足时用描述性文本兜底，后处理未清洗
+  - 修复：新增 `replaceNonPlaceVisits()`，命中 `NON_PLACE_PHRASES`（返回酒店/返程/去机场/休息/自由活动/市区漫步/待定景点/`(n-m)` 后缀）的 visit 活动替换为候选池中未用真实地点，无候选则剔除；并在提示词中明令禁止
+  - 验证：近期行程 0 占位
+
+- **餐厅坐标被高德泛匹配带偏（18km 误差）**：
+  - 问题：`晚餐·南京大牌档(杭州)` 地理编码为 `(120.031913, 30.242111)`，导致「雷峰塔→晚餐」算成 18.8km / 80min，实际应约 5km
+  - 原因：`resolveNodeCoord()` 优先调高德 API，带 `(杭州)` 后缀的查询被泛匹配到错误地点；内置校准坐标表仅作为 API 失败后的兜底，永远不生效
+  - 修复：`resolveNodeCoord()` 改为**内置餐厅坐标优先**（`lookupRestaurantCoord()` 命中即返回），并新增 `stripPlaceSuffix()` 去掉尾部城市消歧括号后再调 API
+  - 验证：坐标变为 `(120.155, 30.251)`，路段 2.5km / 31min；日志 `地理编码命中内置坐标`
+
+- **县城 POI 混入城市行程**：
+  - 问题：大理行程中出现「宾川中心1号商业步行街」（距市中心约 25km 的县城地点）
+  - 原因：POI 半径过滤阈值 35km 过大，县城也在半径内
+  - 修复：`PoiSearchService.MAX_DISTANCE_KM` 35 → 20；同时限制 POI 名称长度 2~20 字符过滤噪声
+  - 验证：大理行程地点全部落在市区及近郊（大理古城/喜洲/双廊/蝴蝶泉）
+
+- **通用餐名跨天被误去重**：
+  - 问题：`dedupeVisitActivities()` 按名称去重，导致次日的「午餐·XX」因同名被删除，出现「当天无午餐/无晚餐」
+  - 原因：去重逻辑对用餐活动未区分「通用餐名」与「具体餐厅」
+  - 修复：新增 `isGenericMealName(city, name)`，双方均为通用餐名（`isKnownRestaurant` 为 false、或命中 `isPlaceholderText`、以「美食」结尾、等于城市名+「美食」、等于 `FOOD_KEYWORDS` 单项）时 `continue` 不去重；具体餐厅名仍正常去重
+  - 验证：4 日行程每天午餐、晚餐齐全
+
+### 已知遗留（未修复）
+
+- `InlinePlanningService`（trip-service 故障兜底）城市池未补 museum 类条目
+- `RouteService` 偶发 `高德公交规划失败: Index 0 out of bounds for length 0`（空路线段解析，已有驾车兜底，不影响结果）
+- `planning-worker`（8084）服务 DOWN，为既有遗留状态
+- rawInput 描述天数与前端日期区间计算结果不一致时（如「玩两天」但日期跨 4 天），以日期区间为准，需与用户确认
+
+---
+
+## 常见问题排查指南
+
+### 服务与端口
+
+| 服务 | 端口 | 日志 |
+|------|------|------|
+| auth-service | 8081 | `auth-service/stdout.log` |
+| trip-service | 8082 | `trip-service/stdout.log` |
+| plan-service | 8083 | `plan-service/stdout.log` |
+| planning-worker | 8084 | `planning-worker/stdout.log`（当前 DOWN） |
+| notification-service | 8085 | `notification-service/stdout.log` |
+| gateway | 8086 | `gateway/stdout.log` |
+
+> 重启：`powershell -ExecutionPolicy Bypass -File D:\agent-trip-planner\restart-all.ps1`
+> 构建：先 `Get-Process java | Stop-Process -Force`，再根目录 `mvn.cmd -q package -DskipTests`（存在 jar 锁时必须先停 Java）
+> 编译检查：`mvn.cmd -q -pl plan-service -am compile -o`
+
+### 环境
+
+1. **MySQL**：宿主机 `127.0.0.1:3306`，库 `trip_planner`，账号 `root`；Docker `3307` 仅供 planning-worker
+2. **Redis**：`127.0.0.1:6379`
+3. **中文乱码**：确认 JVM 启动参数包含 `-Dfile.encoding=UTF-8`
+4. **Kafka 报错**：可忽略，系统设计为不依赖 Kafka
+
+### 行程数据
+
+- 活动数据存放在 `trip_versions.activities`（非 `activities` 表）
+- 关键字段：`poi_name`、`activity_type`、`scheduled_start`、`scheduled_end`、`duration_min`、`travel_duration_min`、`travel_distance_km`
+- 查看某行程：`node D:\agent-trip-planner\showtrip.js <tripId>`
+- 校验时间/餐次约束：`node D:\agent-trip-planner\check-time.js`（扫描近 2 小时行程版本，输出 `RESULT`/`FAILURES`）
+- 多元化校验：`node D:\agent-trip-planner\e2e-diversity.js`（大理 4 日，校验类别数、餐次、时间约束、21:00）
+
+### API
+
+1. **401 未授权** → 检查 Token 是否过期
+2. **403 禁止访问** → 检查用户权限
+3. **500 服务器错误** → 查看对应服务 `stdout.log`
+4. **E2E 走网关** → `http://localhost:8086`，测试账号 `admin@tripplanner.com` / `Admin@123456`

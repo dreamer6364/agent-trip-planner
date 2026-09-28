@@ -1,0 +1,163 @@
+# ==========================================
+# Vector 配置文件
+# 日志收集 -> VictoriaMetrics (指标) + Jaeger (链路追踪)
+# ==========================================
+
+# ------------------------------------------
+# 数据源
+# ------------------------------------------
+sources:
+  # Docker 容器日志
+  docker_logs:
+    type: docker_logs
+    include_labels: true
+    exclude_labels:
+      - "com.docker.compose.project"
+    auto_partial_merge: true
+
+  # 内部指标 (Vector 自身)
+  internal_metrics:
+    type: internal_metrics
+
+# ------------------------------------------
+# 数据转换
+# ------------------------------------------
+transforms:
+  # 解析 JSON 格式日志 (Spring Boot 默认 JSON 输出)
+  parse_json_logs:
+    type: remap
+    inputs: ["docker_logs"]
+    source: |
+      # 尝试解析 message 字段为 JSON
+      .parsed = parse_json!(.message, "fallback")
+      
+      # 如果解析成功，提取关键字段
+      if .parsed != null {
+        .level = .parsed.level ?? .level ?? "info"
+        .logger = .parsed.logger ?? .logger ?? "unknown"
+        .thread = .parsed.thread ?? .thread ?? "unknown"
+        .message = .parsed.message ?? .message ?? ""
+        .timestamp = .parsed.timestamp ?? .timestamp ?? now()
+        
+        # 提取 trace_id 和 span_id
+        .trace_id = .parsed.trace_id ?? .parsed.mdc_trace_id ?? .parsed."X-B3-TraceId" ?? uuid_v4!()
+        .span_id = .parsed.span_id ?? .parsed.mdc_span_id ?? .parsed."X-B3-SpanId" ?? ""
+        
+        # 服务名 (从 Docker label 获取)
+        .service = .container_labels["com.docker.compose.service"] ?? "unknown"
+      } else {
+        # 非 JSON 日志，保留原样
+        .level = .level ?? "info"
+        .service = .container_labels["com.docker.compose.service"] ?? "unknown"
+        .trace_id = uuid_v4!()
+      }
+      
+      # 标准化级别
+      .level = upper!(.level)
+
+  # 添加 Kubernetes / Docker 元数据
+  enrich_metadata:
+    type: remap
+    inputs: ["parse_json_logs"]
+    source: |
+      # 容器信息
+      .container_id = .container_id ?? ""
+      .container_name = .container_name ?? ""
+      .image_name = .container_image_name ?? ""
+      
+      # 标签
+      .compose_project = .container_labels["com.docker.compose.project"] ?? ""
+      .compose_service = .container_labels["com.docker.compose.service"] ?? ""
+      .compose_version = .container_labels["com.docker.compose.version"] ?? ""
+      
+      # 主机信息
+      .host = host_info!().hostname
+
+  # 指标提取 (从日志中提取 Prometheus 指标)
+  extract_metrics:
+    type: remap
+    inputs: ["enrich_metadata"]
+    source: |
+      # 仅处理包含指标的日志 (Spring Boot Actuator / Micrometer)
+      if .logger == "io.micrometer" or .message contains "metric" {
+        # 这里可以添加指标提取逻辑
+        # 实际项目中建议使用 Prometheus 直接抓取 /actuator/prometheus
+      }
+
+  # 链路追踪数据准备
+  prepare_traces:
+    type: remap
+    inputs: ["enrich_metadata"]
+    source: |
+      # 只有包含 trace_id 的日志才发送到 Jaeger
+      ._send_to_jaeger = .trace_id != "" and .trace_id != null
+
+# ------------------------------------------
+# 数据下沉
+# ------------------------------------------
+sinks:
+  # ----------------------------------------
+  # VictoriaMetrics - 指标存储
+  # ----------------------------------------
+  victoria_metrics:
+    type: prometheus
+    inputs: ["internal_metrics"]
+    endpoint: "http://victoria-metrics:8428/api/v1/write"
+    healthcheck: true
+    batch:
+      max_size: 1000
+      timeout: 5
+    encoding:
+      compression: gzip
+
+  # ----------------------------------------
+  # Jaeger - 分布式链路追踪
+  # ----------------------------------------
+  jaeger:
+    type: jaeger
+    inputs: ["prepare_traces"]
+    condition: ._send_to_jaeger == true
+    endpoint: "http://jaeger:4317"
+    encoding: "protobuf"
+    batch:
+      max_size: 1000
+      timeout: 5
+
+  # ----------------------------------------
+  # 控制台输出 (开发调试用)
+  # ----------------------------------------
+  console:
+    type: console
+    inputs: ["enrich_metadata"]
+    target: "stdout"
+    encoding:
+      codec: "json"
+    # 生产环境可注释掉
+    # condition: .level == "ERROR" or .level == "WARN"
+
+  # ----------------------------------------
+  # 文件存储 (可选，用于归档)
+  # ----------------------------------------
+  # file_archive:
+  #   type: file
+  #   inputs: ["enrich_metadata"]
+  #   path: "/var/log/trip-planner/%Y-%m-%d.json"
+  #   encoding:
+  #     codec: "json"
+  #   rotate:
+  #     max_size: 100000000
+  #     max_files: 30
+
+# ------------------------------------------
+# 全局配置
+# ------------------------------------------
+api:
+  enabled: true
+  address: "0.0.0.0:8686"
+  playground: true
+
+# 缓冲区配置
+buffer:
+  type: memory
+  max_events: 10000
+  when_full: "block"

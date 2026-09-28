@@ -1,0 +1,231 @@
+{
+  "app": {
+    "name": "TripForge",
+    "slogan": "说出想法，AI帮你规划"
+  },
+  "nav": {
+    "home": "首页",
+    "dashboard": "我的行程",
+    "create": "新建行程",
+    "newTrip": "新建行程",
+    "explore": "发现",
+    "profile": "个人中心",
+    "login": "登录",
+    "register": "注册",
+    "logout": "退出登录",
+    "myTrips": "我的行程",
+    "settings": "设置"
+  },
+  "auth": {
+    "login": "登录",
+    "register": "注册",
+    "email": "邮箱",
+    "password": "密码",
+    "confirmPassword": "确认密码",
+    "name": "用户名",
+    "rememberMe": "记住我",
+    "noAccount": "还没有账号？",
+    "hasAccount": "已有账号？",
+    "forgotPassword": "忘记密码？",
+    "loginSuccess": "登录成功",
+    "registerSuccess": "注册成功",
+    "passwordHint": "密码至少8位，且需包含大写字母、小写字母、数字和特殊字符（{'@$!%*?&'}）",
+    "loginFailed": "登录失败，请重试",
+    "registerFailed": "注册失败，请重试"
+  },
+  "dashboard": {
+    "title": "我的行程",
+    "search": "搜索行程...",
+    "filterAll": "全部",
+    "filterDraft": "草稿",
+    "filterPlanning": "规划中",
+    "filterCompleted": "已完成",
+    "empty": "还没有行程，开始规划吧",
+    "createFirst": "创建第一个行程"
+  },
+  "trip": {
+    "create": "新建行程",
+    "edit": "编辑行程",
+    "delete": "删除行程",
+    "plan": "AI 规划",
+    "share": "分享",
+    "export": "导出",
+    "title": "行程标题",
+    "destination": "目的地",
+    "startDate": "开始日期",
+    "endDate": "结束日期",
+    "describe": "描述你的旅行想法...",
+    "transportMode": "交通方式",
+    "mixed": "混合",
+    "walk": "步行",
+    "transit": "公共交通",
+    "drive": "自驾",
+    "bike": "骑行",
+    "parsePreview": "AI 解析预览",
+    "parsing": "正在解析...",
+    "createSuccess": "行程创建成功",
+    "deleteConfirm": "确定要删除这个行程吗？此操作不可撤销。",
+    "days": "天",
+    "activities": "个活动"
+  },
+  "timeline": {
+    "day": "第 {n} 天",
+    "today": "今天",
+    "dragHint": "拖拽调整顺序",
+    "noActivities": "暂无活动安排"
+  },
+  "activity": {
+    "visit": "游览",
+    "meal": "用餐",
+    "transit": "交通",
+    "stay": "住宿",
+    "shopping": "购物",
+    "museum": "参观",
+    "park": "公园",
+    "temple": "寺庙"
+  },
+  "swap": {
+    "title": "备选景点",
+    "current": "当前景点",
+    "alternatives": "备选方案",
+    "swap": "替换",
+    "confirm": "确认替换",
+    "cancel": "取消",
+    "loading": "正在查找备选...",
+    "empty": "暂无备选方案",
+    "success": "替换成功"
+  },
+  "planning": {
+    "title": "AI 正在规划",
+    "subtitle": "正在为你生成最佳行程方案",
+    "stages": {
+      "parse": "解析输入",
+      "geocode": "地理编码",
+      "model": "构建模型",
+      "solve": "求解优化",
+      "route": "路线规划",
+      "persist": "保存结果"
+    },
+    "completed": "规划完成",
+    "failed": "规划失败",
+    "retry": "重试"
+  },
+  "share": {
+    "title": "分享行程",
+    "createLink": "创建分享链接",
+    "copyLink": "复制链接",
+    "expiresAt": "有效期",
+    "days": "{n} 天",
+    "never": "永不过期",
+    "password": "访问密码",
+    "public": "公开分享",
+    "revoke": "撤销分享",
+    "copied": "链接已复制"
+  },
+  "export": {
+    "title": "导出行程",
+    "pdf": "导出 PDF",
+    "json": "导出 JSON",
+    "ics": "导出日历",
+    "exporting": "正在导出..."
+  },
+  "notification": {
+    "title": "通知",
+    "empty": "暂无通知",
+    "markAllRead": "全部已读",
+    "progress": "规划进度",
+    "completed": "规划完成",
+    "failed": "规划失败"
+  },
+  "profile": {
+    "title": "个人中心",
+    "nickname": "昵称",
+    "phone": "手机号",
+    "save": "保存",
+    "saved": "已保存",
+    "preferences": "旅行偏好",
+    "defaultCity": "默认城市",
+    "intensity": "旅行强度",
+    "relaxed": "轻松",
+    "standard": "标准",
+    "packed": "紧凑",
+    "changePassword": "修改密码",
+    "currentPassword": "当前密码",
+    "newPassword": "新密码",
+    "confirmNewPassword": "确认新密码"
+  },
+  "common": {
+    "confirm": "确认",
+    "cancel": "取消",
+    "save": "保存",
+    "delete": "删除",
+    "edit": "编辑",
+    "loading": "加载中...",
+    "error": "出错了",
+    "retry": "重试",
+    "noData": "暂无数据",
+    "back": "返回"
+  },
+  "landing": {
+    "hero": {
+      "title": "TripForge - AI 智能行程规划",
+      "subtitle": "输入自然语言，AI 自动生成完美行程。告别繁琐的手动规划，让智能算法为你打造独一无二的旅行方案。",
+      "cta": "开始规划",
+      "ctaDashboard": "前往仪表盘",
+      "ctaSecondary": "了解更多"
+    },
+    "features": {
+      "title": "为什么选择 TripForge",
+      "ai": {
+        "title": "AI 智能规划",
+        "desc": "输入自然语言，AI自动生成完美行程"
+      },
+      "swap": {
+        "title": "实时替换",
+        "desc": "一键切换景点，智能调整路线"
+      },
+      "share": {
+        "title": "协作分享",
+        "desc": "生成分享链接，邀请朋友查看"
+      }
+    },
+    "stats": {
+      "cities": "500+ 城市",
+      "trips": "10万+ 行程",
+      "satisfaction": "99% 满意度"
+    },
+    "footer": "Powered by TripForge © 2026"
+  },
+  "tripCreate": {
+    "title": "AI 智能规划",
+    "cityLabel": "目的城市（可选）",
+    "cityPlaceholder": "如：北京（留空自动识别）",
+    "pace": {
+      "label": "活动频率",
+      "hint": "每日游览时长不含用餐与交通，AI 将按该节奏安排景点数量与停留时间",
+      "compact": "紧凑",
+      "moderate": "适中",
+      "relaxed": "宽松",
+      "compactHours": "8~10 小时/天",
+      "moderateHours": "6~8 小时/天",
+      "relaxedHours": "3~5 小时/天",
+      "compactVisits": "约 4~6 个景点",
+      "moderateVisits": "约 3~5 个景点",
+      "relaxedVisits": "约 2~3 个景点"
+    },
+    "tips": {
+      "title": "规划小技巧",
+      "hint": "描述越具体（城市、天数、偏好、必去景点），AI 生成的行程越贴合你的需求。"
+    }
+  },
+  "parseSummary": {
+    "title": "AI 解析结果",
+    "cityLabel": "识别城市",
+    "cityFallback": "未识别到目的城市，将仅按描述中的地点规划",
+    "summaryLabel": "解析摘要",
+    "spots": "景点 {count} 个",
+    "meals": "用餐 {count} 餐",
+    "rawTitle": "原始描述",
+    "quoteTip": "来自你的原始描述"
+  }
+}
