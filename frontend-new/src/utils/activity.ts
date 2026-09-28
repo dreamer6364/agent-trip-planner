@@ -157,6 +157,7 @@ export function computeStatsFromActivities(list: Activity[]): Partial<VersionSta
   let visitDurationMin = 0
   let transitDurationMin = 0
   let mealDurationMin = 0
+  let restDurationMin = 0
   const placeCount: Record<string, number> = { must: 0, recommended: 0, optional: 0 }
 
   for (const a of list) {
@@ -168,6 +169,9 @@ export function computeStatsFromActivities(list: Activity[]): Partial<VersionSta
     } else if (type === 'meal') {
       mealDurationMin += dur
       transitDurationMin += travel
+    } else if (type === 'rest') {
+      restDurationMin += dur
+      transitDurationMin += travel
     } else {
       visitDurationMin += dur
       transitDurationMin += travel
@@ -177,10 +181,11 @@ export function computeStatsFromActivities(list: Activity[]): Partial<VersionSta
   }
 
   return {
-    totalDurationMin: visitDurationMin + transitDurationMin + mealDurationMin,
+    totalDurationMin: visitDurationMin + transitDurationMin + mealDurationMin + restDurationMin,
     visitDurationMin,
     transitDurationMin,
     mealDurationMin,
+    restDurationMin,
     placeCount,
   }
 }

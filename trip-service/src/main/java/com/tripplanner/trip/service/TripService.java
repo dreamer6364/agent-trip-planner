@@ -961,6 +961,7 @@ public class TripService {
         int visitDuration = 0;
         int transitDuration = 0;
         int mealDuration = 0;
+        int restDuration = 0;
         Map<String, Long> placeCount = new java.util.LinkedHashMap<>();
         placeCount.put("must", 0L);
         placeCount.put("recommended", 0L);
@@ -976,6 +977,9 @@ public class TripService {
             } else if ("meal".equals(type)) {
                 mealDuration += duration;
                 transitDuration += travel;
+            } else if ("rest".equals(type)) {
+                restDuration += duration;
+                transitDuration += travel;
             } else {
                 visitDuration += duration;
                 transitDuration += travel;
@@ -985,10 +989,11 @@ public class TripService {
         }
 
         Map<String, Object> stats = new java.util.LinkedHashMap<>();
-        stats.put("totalDurationMin", visitDuration + transitDuration + mealDuration);
+        stats.put("totalDurationMin", visitDuration + transitDuration + mealDuration + restDuration);
         stats.put("visitDurationMin", visitDuration);
         stats.put("transitDurationMin", transitDuration);
         stats.put("mealDurationMin", mealDuration);
+        stats.put("restDurationMin", restDuration);
         stats.put("bufferDurationMin", 0);
         stats.put("placeCount", placeCount);
         stats.put("totalActivities", activities.size());
@@ -1015,6 +1020,7 @@ public class TripService {
             case "restaurant", "meal" -> "meal";
             case "shopping" -> "shopping";
             case "transit", "transport" -> "transit";
+            case "rest" -> "rest";
             case "museum", "temple", "park", "scenic", "other", "visit" -> "visit";
             default -> "visit";
         };
@@ -1034,6 +1040,11 @@ public class TripService {
             String name = String.valueOf(a.getOrDefault("poi_name", a.getOrDefault("name", ""))).trim();
             boolean transit = "transit".equals(type) || "transport".equals(type);
             boolean meal = "meal".equals(type) || "restaurant".equals(type);
+            boolean rest = "rest".equals(type) || "buffer".equals(type);
+            if (rest) {
+                out.add(a);
+                continue;
+            }
             if ((meal || (!transit && !name.isEmpty())) && !name.isEmpty()) {
                 String key = normalizeActivityName(name);
                 boolean dup = false;

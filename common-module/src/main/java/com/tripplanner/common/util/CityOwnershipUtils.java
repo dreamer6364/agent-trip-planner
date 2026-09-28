@@ -232,7 +232,8 @@ public final class CityOwnershipUtils {
             String type = typeFn.apply(item);
             boolean isVisit = type == null
                     || (!"meal".equals(type) && !"transit".equals(type)
-                        && !"buffer".equals(type) && !"transport".equals(type));
+                        && !"buffer".equals(type) && !"transport".equals(type)
+                        && !"rest".equals(type));
             if (isVisit && name != null && !name.isBlank()) {
                 visitTotal++;
                 if (!belongsToCity(name, targetCity)) {
@@ -270,7 +271,7 @@ public final class CityOwnershipUtils {
             String name = nameFn.apply(item);
             String type = typeFn.apply(item);
             boolean isTransport = "transit".equals(type) || "buffer".equals(type)
-                    || "transport".equals(type);
+                    || "transport".equals(type) || "rest".equals(type);
             if (!isTransport && name != null && !name.isBlank()) {
                 checkedTotal++;
                 if (!belongsToCity(name, targetCity)) {

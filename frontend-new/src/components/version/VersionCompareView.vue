@@ -31,6 +31,7 @@ const TYPE_LABELS: Record<string, string> = {
   park: '公园',
   temple: '寺庙',
   shopping: '购物',
+  rest: '休息',
 }
 
 function versionActs(v?: TripVersion): Activity[] {

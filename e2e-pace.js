@@ -103,7 +103,7 @@ function loadPace(tripId) {
       let visitMin = 0, visitCnt = 0;
       for (const a of list) {
         const t = a.activity_type || a.type;
-        if (t !== 'meal' && t !== 'transit') { visitMin += Number(a.duration_min || 0); visitCnt++; }
+        if (t !== 'meal' && t !== 'transit' && t !== 'rest') { visitMin += Number(a.duration_min || 0); visitCnt++; }
       }
       const inBand = visitMin >= c.expect.minHours * 60 - 30 && visitMin <= c.expect.maxHours * 60;
       const cntOk = visitCnt >= c.expect.minVisits && visitCnt <= c.expect.maxVisits;

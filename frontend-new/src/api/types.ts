@@ -228,6 +228,7 @@ export interface VersionStats {
   transitDurationMin?: number
   visitDurationMin?: number
   mealDurationMin?: number
+  restDurationMin?: number
   bufferDurationMin?: number
   placeCount?: Record<string, number>
   estimatedCost?: number

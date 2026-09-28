@@ -985,7 +985,7 @@ public class TripPlanningAgent {
         for (Map<String, Object> a : activities) {
             String type = String.valueOf(a.getOrDefault("type", "visit"));
             boolean isTransport = "transit".equals(type) || "buffer".equals(type)
-                    || "transport".equals(type);
+                    || "transport".equals(type) || "rest".equals(type);
             if (isTransport) {
                 kept.add(a);
                 continue;
@@ -2183,7 +2183,10 @@ public class TripPlanningAgent {
                 (acts, ctx) -> fixTimeOverlaps(acts),
                 // 二次节奏补时（最多 3 轮，无提升即止）→ 收口裁剪
                 this::refillStep,
-                (acts, ctx) -> applyPaceBudget(acts, ctx.getPace())
+                (acts, ctx) -> applyPaceBudget(acts, ctx.getPace()),
+                // 智能休息节点（按节奏频率插入，见 RestSchedulePolicy）→ 时间轴收口
+                this::insertRestStep,
+                (acts, ctx) -> fixTimeOverlaps(acts)
         );
     }
 
@@ -2240,6 +2243,112 @@ public class TripPlanningAgent {
             }
         }
         return current;
+    }
+
+    /** 智能休息节点步骤：按节奏频率插入休息节点（失败保留原活动） */
+    private List<Map<String, Object>> insertRestStep(List<Map<String, Object>> acts, PlanningContext ctx) {
+        try {
+            return insertRestNodes(acts, ctx.getPace());
+        } catch (Exception e) {
+            log.warn("智能休息节点插入失败，保留原活动: {}", e.getMessage());
+            return acts;
+        }
+    }
+
+    /**
+     * 智能休息节点插入（管道收尾）
+     *
+     * 按天调用 {@link RestSchedulePolicy} 决策：连续游览+在途达到节奏阈值即在触发活动后
+     * 插入 type=rest 节点；travel 传播遵循不变式——原地休息（前一活动路程归零），
+     * 休息节点接管原「前一→后一」的路程；后续活动时间交由 fixTimeOverlaps 只后推自动校准。
+     */
+    private List<Map<String, Object>> insertRestNodes(List<Map<String, Object>> acts, TripPace pace) {
+        if (acts == null || acts.isEmpty()) {
+            return acts;
+        }
+        Map<Integer, List<Map<String, Object>>> byDay = new java.util.LinkedHashMap<>();
+        for (Map<String, Object> a : acts) {
+            int day = toIntSafe(a.getOrDefault("day", 1));
+            byDay.computeIfAbsent(day, k -> new ArrayList<>()).add(a);
+        }
+        List<Map<String, Object>> out = new ArrayList<>();
+        int inserted = 0;
+        for (Map.Entry<Integer, List<Map<String, Object>>> e : byDay.entrySet()) {
+            List<Map<String, Object>> dayActs = e.getValue();
+            // 按时间序对齐 List 顺序与时间轴，保证「前一活动」语义与 fixTimeOverlaps 排序一致
+            dayActs.sort(Comparator.comparingInt(a -> Math.max(0,
+                    toMinuteOfDay(a.containsKey("startTime") ? a.get("startTime") : a.get("scheduled_start")))));
+            List<RestSchedulePolicy.Item> items = new ArrayList<>();
+            for (Map<String, Object> a : dayActs) {
+                items.add(new RestSchedulePolicy.Item(
+                        String.valueOf(a.getOrDefault("type", a.getOrDefault("activity_type", "visit"))),
+                        toMinuteOfDay(a.getOrDefault("startTime", a.get("scheduled_start"))),
+                        endMinuteOfDay(a),
+                        toIntSafe(a.getOrDefault("travelTimeMin", a.get("travel_duration_min")))));
+            }
+            RestSchedulePolicy.Plan plan = RestSchedulePolicy.planDay(items, pace);
+            if (plan.insertions().isEmpty()) {
+                out.addAll(dayActs);
+                continue;
+            }
+            int ptr = 0;
+            for (int i = 0; i < dayActs.size(); i++) {
+                Map<String, Object> act = dayActs.get(i);
+                out.add(act);
+                while (ptr < plan.insertions().size() && plan.insertions().get(ptr).afterIndex() == i) {
+                    RestSchedulePolicy.Insertion ins = plan.insertions().get(ptr++);
+                    out.add(buildRestActivity(e.getKey(), act, ins));
+                    inserted++;
+                }
+            }
+        }
+        if (inserted == 0) {
+            return acts;
+        }
+        log.info("智能休息节点插入完成: {} 个（节奏={}）",
+                inserted, pace == null ? "-" : pace.getCode());
+        return out;
+    }
+
+    /** 构造休息节点并把前一活动的在途路程移交给休息节点（原地休息） */
+    private Map<String, Object> buildRestActivity(int day, Map<String, Object> prev,
+                                                  RestSchedulePolicy.Insertion ins) {
+        int travel = toIntSafe(prev.getOrDefault("travelTimeMin", prev.get("travel_duration_min")));
+        Object dist = prev.getOrDefault("travelDistanceKm", prev.get("travel_distance_km"));
+        String mode = String.valueOf(prev.getOrDefault("transportToNext",
+                prev.getOrDefault("transport_mode", "walk")));
+        prev.put("travelTimeMin", 0);
+        prev.put("travelDistanceKm", 0);
+        prev.put("transportToNext", "walk");
+        log.info("休息节点插入: day={} after={}({}) travel {}km/{}min→0, 休息接管={}",
+                day, prev.getOrDefault("name", "?"), prev.get("startTime"),
+                dist, travel, travel);
+
+        Map<String, Object> rest = new HashMap<>();
+        rest.put("day", day);
+        rest.put("name", ins.label());
+        rest.put("type", "rest");
+        rest.put("startTime", toHhMm(ins.startMin()));
+        rest.put("endTime", toHhMm(ins.startMin() + ins.durationMin()));
+        rest.put("durationMin", ins.durationMin());
+        rest.put("priority", "optional");
+        rest.put("travelTimeMin", travel);
+        if (dist != null) {
+            rest.put("travelDistanceKm", dist);
+        }
+        rest.put("transportToNext", mode);
+        return rest;
+    }
+
+    /** 活动结束分钟（endTime/scheduled_end，缺省用 startTime+duration 推算），无法解析返回 0 */
+    private int endMinuteOfDay(Map<String, Object> a) {
+        Object end = a.containsKey("endTime") ? a.get("endTime") : a.get("scheduled_end");
+        int endMin = toMinuteOfDay(end);
+        if (endMin >= 0) {
+            return endMin;
+        }
+        int start = toMinuteOfDay(a.containsKey("startTime") ? a.get("startTime") : a.get("scheduled_start"));
+        return start >= 0 ? start + toIntSafe(a.get(durationKey(a))) : 0;
     }
 
     /** 组装返回结果（主路径与回退路径共用，fallback 标记仅回退置位） */
@@ -2344,7 +2453,8 @@ public class TripPlanningAgent {
         for (Map<String, Object> a : activities) {
             String type = String.valueOf(a.getOrDefault("type", a.getOrDefault("activity_type", "visit")));
             String name = String.valueOf(a.getOrDefault("name", a.getOrDefault("poi_name", "")));
-            boolean visitLike = !"meal".equals(type) && !"restaurant".equals(type) && !"transit".equals(type);
+            boolean visitLike = !"meal".equals(type) && !"restaurant".equals(type)
+                    && !"transit".equals(type) && !"rest".equals(type);
             if (visitLike && isNonPlaceVisit(name)) {
                 String replacement = pickNextPlace(pool, places, usedNames, guard++, city, null, null);
                 if (replacement == null) {
@@ -2378,7 +2488,8 @@ public class TripPlanningAgent {
             String type = String.valueOf(a.getOrDefault("type", a.getOrDefault("activity_type", "visit")));
             String name = String.valueOf(a.getOrDefault("name", a.getOrDefault("poi_name", ""))).trim();
             boolean mealLike = "meal".equals(type) || "restaurant".equals(type);
-            boolean visitLike = !"meal".equals(type) && !"restaurant".equals(type) && !"transit".equals(type);
+            boolean visitLike = !"meal".equals(type) && !"restaurant".equals(type)
+                    && !"transit".equals(type) && !"rest".equals(type);
             if ((visitLike || mealLike) && !name.isEmpty()) {
                 List<String> seen = mealLike ? seenMeals : seenVisit;
                 List<String> other = mealLike ? seenVisit : seenMeals;
@@ -3299,11 +3410,12 @@ public class TripPlanningAgent {
         return out;
     }
 
-    /** 是否为游览类活动（排除用餐与交通） */
+    /** 是否为游览类活动（排除用餐、交通与休息） */
     private boolean isVisitActivity(Map<String, Object> a) {
         String type = String.valueOf(a.getOrDefault("type", a.getOrDefault("activity_type", "")));
         return switch (type.toLowerCase()) {
-            case "meal", "breakfast", "lunch", "dinner", "transit", "restaurant", "free", "freetime" -> false;
+            case "meal", "breakfast", "lunch", "dinner", "transit", "restaurant",
+                 "free", "freetime", "rest" -> false;
             default -> !type.isBlank();
         };
     }

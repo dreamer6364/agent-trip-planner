@@ -11,6 +11,34 @@ TripForge 的所有重要变更都会记录在此文件中。
 
 ---
 
+## [1.21.0] - 2026-09-28
+
+### 新功能
+
+- **智能休息节点规划（按节奏频率插入「中场休息 / 午后小憩 / 上午茶歇」）**：
+  - 背景：长时段连续游览无休憩提示；本轮目标——按节奏（pace）以**不同频率**自动插入休息节点
+  - 后端·调度策略 `RestSchedulePolicy`（纯函数、无 IO，可单测）：三档参数 **紧凑 150 分钟阈值/15 分钟/每日 1 次、适中 120/20/2、宽松 90/30/2**；连续游览+在途累计达阈值即在触发活动后插入；**餐食与已有休息重置连续计时**（餐即休息）；下一项是餐不插；当天最后一项不插；**21:00 作息收口预演**（插入会把当日末尾推过 21:00 则放弃该次插入）；休息名称按钟点分档：<11:30 上午茶歇、13:00-17:30 午后小憩、其余中场休息
+  - 后端·管道接入：`TripPlanningAgent.postPipeline` 末尾追加两步（**20 → 22 步**）——`insertRestStep`（try/catch 失败保留原活动）→ 再跑 `fixTimeOverlaps` 收口时间轴；`insertRestNodes` 按天分组、**先按 startTime 排序对齐 List 顺序与时间轴**（否则「前一活动」travel 归零会错位），插入后按不变式传播路程——**前一活动 travel 归零（原地休息）**，休息节点接管原「前一→后一」的 travel/distance/mode，后续活动时间由 fixTimeOverlaps 自动顺延
+  - 后端·落库白名单（否则 rest 会被清洗/误统计）：`isVisitActivity`、`filterActivitiesByCity`、`replaceNonPlaceVisits` visitLike、`dedupeVisitActivities`（plan-service）；`mapActivityType` 增 `case "rest"`、`dedupeActivitiesForPersist` 豁免同名去重、`buildStatsFromActivities` 新增 `restDurationMin` 统计（rest 不计 visitDuration/placeCount，计入 totalDuration）（trip-service）；`CityOwnershipUtils.filterVisitsForCity/filterActivitiesForCity` 豁免（common-module）
+  - 前端：`mapTheme TYPE_THEMES`+图例、`ActivityCard` rest 配置、`VersionCompareView TYPE_LABELS`、`ShareView` 图标/中文、`activity.ts computeStats` rest 分支、`VersionStats.restDurationMin?`；**rest 卡片禁拖拽/禁换序**（`DayTimeline` `:draggable`、`ActivityCard` swap 按钮 `v-if`）
+  - 单测：新增 `RestSchedulePolicyTest` 9 用例（三档参数/阈值触发/餐前不插+重置/21:00 放弃/末活动不插/每日上限/紧凑档/名称边界/类型判定）
+  - 已知限制：**inline 回退路径不插休息**（仅主路径 postPipeline）；测试口径 `e2e-pace.js` 游览时长统计已排除 `rest`
+  - 文件：`plan-service/.../agent/{RestSchedulePolicy.java,TripPlanningAgent.java}`、`plan-service/src/test/.../RestSchedulePolicyTest.java`、`trip-service/.../TripService.java`、`common-module/.../CityOwnershipUtils.java`、`frontend-new/src/{utils/mapTheme.ts,utils/activity.ts,api/types.ts,components/timeline/{ActivityCard.vue,DayTimeline.vue},components/version/VersionCompareView.vue,components/share/ShareView.vue}`
+
+### 验证方式与结果（2026-09-28）
+
+| 项 | 结果 |
+|---|---|
+| `RestSchedulePolicyTest` 9 用例 | 9/9 PASS ✅ |
+| 后端全量单测（plan 36 + trip 19 + common 15） | `BUILD SUCCESS` 全绿 ✅ |
+| `verify-rest.js` E2E（新建 3 天适中节奏行程 → rest 存在/每日 ≤2/时长 20/名称三档/时间不变式/前一活动 travel=0 且休息接管路程/无坐标/`restDurationMin` 与手工验算一致/placeCount 不含 rest/末活动 ≤21:00） | 连续 **2 轮 23/0 PASS** ✅ |
+| 首轮发现的 travel 归零错位（「清河坊步行街 travel=11 未归零」）→ 根因：`insertRestNodes` 按 List 原序取「前一活动」与时间轴不一致 → 加按 startTime 排序修复，取证日志确认归零/接管正确 | 修复后全绿 ✅ |
+| 回归：`verify-d` / `verify-search` / `verify-variant` / `verify-rollback` | **22/22、28/28（首轮 27/28 为高德接口波动，重跑全绿）、16/16、17/17** ✅ |
+| 发布管线：`npm run build`（vue-tsc）→ `robocopy /MIR` → stop → `mvn -o package -DskipTests` → start | 8081-8086 全 UP（TCP 探测）✅ |
+| 休息节点前端展示/拖拽禁用 | 仅 vue-tsc+build+代码走查，未做人工浏览器点击 ⚠️ |
+
+---
+
 ## [1.20.0] - 2026-09-28
 
 ### 功能增强

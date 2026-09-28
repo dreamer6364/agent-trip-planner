@@ -99,8 +99,8 @@ function isActive(activity: Activity) {
         <template v-for="(activity, index) in day.items" :key="activity.id || index">
           <div
             class="relative"
-            draggable="true"
-            @dragstart="handleDragStart(index)"
+            :draggable="activity.activityType !== 'rest'"
+            @dragstart="activity.activityType !== 'rest' && handleDragStart(index)"
             @dragend="handleDragEnd(index)"
             @dragover.prevent
             @drop.prevent="handleDrop($event.dataTransfer?.getData('text/plain') as unknown as number, index)"

@@ -41,6 +41,7 @@ function getActivityTypeIcon(type: string): string {
     WALKING: '🚶',
     MEAL: '🍜',
     BREAK: '☕',
+    rest: '☕',
   }
   return iconMap[type] || '📍'
 }
@@ -56,6 +57,7 @@ function getActivityTypeLabel(type: string): string {
     WALKING: '步行',
     MEAL: '用餐',
     BREAK: '休息',
+    rest: '休息',
   }
   return labelMap[type] || '活动'
 }

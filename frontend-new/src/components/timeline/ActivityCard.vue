@@ -70,6 +70,13 @@ const typeConfig = computed(() => {
       bg: 'bg-pink-50 dark:bg-pink-900/20',
       accentBar: 'bg-pink-500',
     },
+    rest: {
+      icon: 'M18 8h1a4 4 0 010 8h-1m-6-8v10m0-10v10M6 8H5a4 4 0 000 8h1m12-4a4 4 0 11-8 0 4 4 0 018 0z',
+      label: '休息',
+      color: 'text-teal-600 dark:text-teal-400',
+      bg: 'bg-teal-50 dark:bg-teal-900/20',
+      accentBar: 'bg-teal-500',
+    },
   }
   return configs[props.activity.activityType] ?? configs.visit
 })
@@ -233,6 +240,7 @@ function handleFocus() {
         </svg>
       </button>
       <button
+        v-if="activity.activityType !== 'rest'"
         type="button"
         class="flex h-7 w-7 items-center justify-center rounded-full bg-brand-500 text-white shadow-glow hover:bg-brand-600 transition-colors animate-bounce-in"
         title="交换位置"

@@ -54,6 +54,13 @@ export const TYPE_THEMES: Record<string, TypeTheme> = {
     icon: 'ri-gamepad-line',
     label: '娱乐',
   },
+  rest: {
+    fill: '#14b8a6',
+    stroke: '#0d9488',
+    text: '#fff',
+    icon: 'ri-cup-line',
+    label: '休息',
+  },
   default: {
     fill: '#6b778c',
     stroke: '#505f79',
@@ -86,7 +93,7 @@ export function getTypeTheme(raw?: string | null): TypeTheme {
 }
 
 /** 图例展示顺序（不含 default） */
-export const TYPE_LEGEND_ORDER = ['visit', 'meal', 'shopping', 'transit', 'hotel', 'entertainment'] as const
+export const TYPE_LEGEND_ORDER = ['visit', 'meal', 'shopping', 'transit', 'rest', 'hotel', 'entertainment'] as const
 
 export interface ModeTheme {
   color: string
