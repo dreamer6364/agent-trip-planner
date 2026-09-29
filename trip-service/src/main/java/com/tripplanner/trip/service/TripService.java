@@ -702,14 +702,22 @@ public class TripService {
     }
 
     /**
-     * 获取公开行程列表
+     * 获取公开行程列表（keyword 非空时按标题/描述/行程内地点名搜索）
      */
-    public TripListResponse listPublicTrips(int page, int size) {
+    public TripListResponse listPublicTrips(int page, int size, String keyword) {
         int safePage = Math.max(1, page);
         int safeSize = Math.max(1, size);
         int offset = (safePage - 1) * safeSize;
-        List<Trip> trips = tripRepository.findPublicTrips(offset, safeSize);
-        long total = tripRepository.countPublicTrips();
+        String kw = keyword == null ? "" : keyword.trim();
+        List<Trip> trips;
+        long total;
+        if (kw.isEmpty()) {
+            trips = tripRepository.findPublicTrips(offset, safeSize);
+            total = tripRepository.countPublicTrips();
+        } else {
+            trips = tripRepository.searchPublicTrips(kw, offset, safeSize);
+            total = tripRepository.countPublicTripsByKeyword(kw);
+        }
         List<TripResponse> items = trips.stream().map(this::toResponse).toList();
 
         return TripListResponse.builder()

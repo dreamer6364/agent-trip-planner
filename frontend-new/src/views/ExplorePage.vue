@@ -13,6 +13,9 @@ const page = ref(1)
 const size = ref(9)
 const loading = ref(false)
 const error = ref('')
+const keyword = ref('')
+
+let debounceTimer: ReturnType<typeof setTimeout> | undefined
 
 const totalPages = () => Math.max(1, Math.ceil(total.value / size.value))
 
@@ -20,7 +23,12 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const data = await tripApi.getPublicTrips({ page: page.value, size: size.value })
+    const kw = keyword.value.trim()
+    const data = await tripApi.getPublicTrips({
+      page: page.value,
+      size: size.value,
+      ...(kw ? { keyword: kw } : {}),
+    })
     trips.value = data.items || []
     total.value = data.total || 0
   } catch {
@@ -29,6 +37,22 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+function searchNow() {
+  if (debounceTimer) clearTimeout(debounceTimer)
+  page.value = 1
+  load()
+}
+
+function onSearchInput() {
+  if (debounceTimer) clearTimeout(debounceTimer)
+  debounceTimer = setTimeout(searchNow, 300)
+}
+
+function clearSearch() {
+  keyword.value = ''
+  searchNow()
 }
 
 function goToPage(p: number) {
@@ -54,6 +78,35 @@ onMounted(load)
           浏览其他旅行者分享的完整行程
           <span v-if="total > 0" class="text-surface-400"> · 共 {{ total }} 条</span>
         </p>
+      </div>
+
+      <div class="mb-6 flex flex-col sm:flex-row sm:items-center gap-3">
+        <div class="relative w-full sm:max-w-md">
+          <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+            <svg class="w-5 h-5 text-surface-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+          </div>
+          <input
+            v-model="keyword"
+            type="text"
+            placeholder="搜索地点、标题或描述..."
+            class="w-full pl-10 pr-10 py-2.5 rounded-xl border border-surface-200 dark:border-surface-600 bg-white dark:bg-surface-800 text-surface-900 dark:text-white placeholder:text-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all"
+            @input="onSearchInput"
+            @keyup.enter="searchNow"
+          />
+          <button
+            v-if="keyword"
+            class="absolute inset-y-0 right-0 pr-3.5 flex items-center"
+            aria-label="清除搜索"
+            @click="clearSearch"
+          >
+            <svg class="w-4 h-4 text-surface-400 hover:text-surface-600 dark:hover:text-surface-300 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <p class="text-xs text-surface-400 dark:text-surface-500">支持搜索城市、景点、餐厅等地点名称</p>
       </div>
 
       <div v-if="loading" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -95,12 +148,22 @@ onMounted(load)
         <div class="w-28 h-28 mb-5 rounded-full bg-gradient-to-br from-accent-100 to-brand-100 flex items-center justify-center">
           <i class="ri-compass-3-line text-5xl text-accent-400"></i>
         </div>
-        <h3 class="text-xl font-semibold text-surface-700 dark:text-surface-200 mb-2">暂无公开行程</h3>
-        <p class="text-surface-500 dark:text-surface-400 mb-6 max-w-md">你可以在行程详情中开启公开分享，让更多人看到你的路线</p>
-        <button class="btn-primary" @click="router.push('/dashboard')">
-          <i class="ri-route-line" />
-          返回我的行程
-        </button>
+        <template v-if="keyword.trim()">
+          <h3 class="text-xl font-semibold text-surface-700 dark:text-surface-200 mb-2">未找到与「{{ keyword.trim() }}」相关的行程</h3>
+          <p class="text-surface-500 dark:text-surface-400 mb-6 max-w-md">换个地点或关键词试试，例如城市、景点或餐厅名</p>
+          <button class="btn-secondary" @click="clearSearch">
+            <i class="ri-close-line" />
+            清除搜索
+          </button>
+        </template>
+        <template v-else>
+          <h3 class="text-xl font-semibold text-surface-700 dark:text-surface-200 mb-2">暂无公开行程</h3>
+          <p class="text-surface-500 dark:text-surface-400 mb-6 max-w-md">你可以在行程详情中开启公开分享，让更多人看到你的路线</p>
+          <button class="btn-primary" @click="router.push('/dashboard')">
+            <i class="ri-route-line" />
+            返回我的行程
+          </button>
+        </template>
       </div>
 
       <div

@@ -121,13 +121,14 @@ public class TripController {
         return ResponseEntity.ok(ApiResponse.success(Map.of("message", "保存成功")));
     }
 
-    @Operation(summary = "查询公开行程列表 (无需登录)")
+    @Operation(summary = "查询公开行程列表 (无需登录)", description = "支持 keyword 按标题/描述/地点名搜索")
     @GetMapping("/public")
     public ResponseEntity<ApiResponse<TripListResponse>> listPublicTrips(
             @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "20") int size
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String keyword
     ) {
-        TripListResponse result = tripService.listPublicTrips(page, size);
+        TripListResponse result = tripService.listPublicTrips(page, size, keyword);
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 

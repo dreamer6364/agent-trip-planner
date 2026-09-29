@@ -11,6 +11,31 @@ TripForge 的所有重要变更都会记录在此文件中。
 
 ---
 
+## [1.25.0] - 2026-09-29
+
+### 功能增强
+
+- **公开行程搜索框（按地点搜索）**
+  - `GET /api/trips/public` 新增可选 `keyword` 参数：非空时按 **标题 / 描述 raw_input / 当前版本行程内地点名** 三路模糊匹配——地点路走 `EXISTS + JSON_SEARCH(trip_versions.activities)`，覆盖行程里的景点与餐厅名（title/raw_input 不含的地名也能搜到）；空白关键词保持原查询与索引路径
+  - 新增 `TripRepository.searchPublicTrips` / `countPublicTripsByKeyword`，`TripService.listPublicTrips(page, size, keyword)` 按关键词分流
+  - `ExplorePage` 标题区下方新增搜索框：300ms 输入防抖、回车即时搜索、一键清除、提示文案「支持搜索城市、景点、餐厅等地点名称」；搜索态空结果展示「未找到与「kw」相关的行程」+ 清除搜索按钮（非搜索态保留原引导文案）
+  - 文件：`trip-service/.../repository/TripRepository.java`、`trip-service/.../service/TripService.java`、`trip-service/.../controller/TripController.java`、`frontend-new/src/api/trip.ts`、`frontend-new/src/views/ExplorePage.vue`
+- **公开行程卡片展示作者 ID**
+  - 公开行程 API 响应本就含 `userId`（`toResponse` 映射，实测 2/2 非空），但 UI 从未展示；`TripCard` 元信息区新增作者 ID 行——仅 `isPublic` 行程显示（`ri-user-3-line` 图标 + 等宽字体全量 ID + `select-all` 可整段复制），私有/草稿卡片不受影响
+  - 文件：`frontend-new/src/components/trip/TripCard.vue`
+
+### 验证方式与结果（2026-09-29）
+
+| 项 | 结果 |
+|---|---|
+| trip-service 单测（`mvn -pl trip-service -am test`） | PASS ✓ |
+| `npm run build`（vue-tsc 类型检查 + vite 构建） | PASS ✓ |
+| `GET /api/trips/public` 作者 ID 覆盖 | 2/2 条目 `userId` 非空、`isPublic=true` ✓ |
+| 标题关键词 | `验证-杭` → hits=1，结果含 userId ✓ |
+| 行程内地点名关键词（title/raw_input 均不含，专走 JSON_SEARCH 分支） | 雷峰塔 / 南宋德寿宫遗址博物馆 / 深圳湾公园 / 深圳欢乐谷 / 深圳海洋世界 / 深圳博物馆 **6/6 命中** ✓ |
+| 不存在关键词 / 空关键词 | 0 条 / 与基线一致（2 条）✓ |
+| 前端部署 | gateway 提供新 `index-DOeqsbYy.js`（与 dist 一致）、`ExplorePage-D_2S6nCU.js` 已同步、`/explore` 200 ✓ |
+
 ## [1.24.0] - 2026-09-29
 
 ### 优化（AI 规划提速：单行程端到端典型 ~170s → 24-75s，行程 LLM 55-107s → 4-26s）

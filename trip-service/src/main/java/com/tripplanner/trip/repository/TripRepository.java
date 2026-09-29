@@ -49,6 +49,44 @@ public interface TripRepository extends BaseMapper<Trip> {
     long countPublicTrips();
 
     /**
+     * 搜索公开行程（标题/描述/当前版本行程内地点名模糊匹配）
+     */
+    @Select("""
+        SELECT * FROM trips 
+        WHERE is_public = true AND status = 'completed'
+        AND (
+            title LIKE CONCAT('%', #{keyword}, '%')
+            OR raw_input LIKE CONCAT('%', #{keyword}, '%')
+            OR EXISTS (
+                SELECT 1 FROM trip_versions v
+                WHERE v.id = trips.current_version_id
+                AND JSON_SEARCH(v.activities, 'one', CONCAT('%', #{keyword}, '%')) IS NOT NULL
+            )
+        )
+        ORDER BY created_at DESC
+        LIMIT #{offset}, #{size}
+        """)
+    List<Trip> searchPublicTrips(@Param("keyword") String keyword, @Param("offset") int offset, @Param("size") int size);
+
+    /**
+     * 统计搜索公开行程结果数
+     */
+    @Select("""
+        SELECT COUNT(1) FROM trips 
+        WHERE is_public = true AND status = 'completed'
+        AND (
+            title LIKE CONCAT('%', #{keyword}, '%')
+            OR raw_input LIKE CONCAT('%', #{keyword}, '%')
+            OR EXISTS (
+                SELECT 1 FROM trip_versions v
+                WHERE v.id = trips.current_version_id
+                AND JSON_SEARCH(v.activities, 'one', CONCAT('%', #{keyword}, '%')) IS NOT NULL
+            )
+        )
+        """)
+    long countPublicTripsByKeyword(@Param("keyword") String keyword);
+
+    /**
      * 根据分享 token 查询
      */
     @Select("SELECT * FROM trips WHERE share_token = #{token} AND is_public = true")

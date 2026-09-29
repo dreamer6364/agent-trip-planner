@@ -105,6 +105,8 @@ const truncatedDescription = computed(() => {
   return text.length > 80 ? text.slice(0, 80) + '...' : text
 })
 
+const authorId = computed(() => (props.trip.isPublic ? props.trip.userId || '' : ''))
+
 function stopClick(e: Event) {
   e.stopPropagation()
 }
@@ -247,6 +249,14 @@ async function confirmDelete() {
           </svg>
           {{ dayCount }} 天
         </span>
+      </div>
+      <div
+        v-if="authorId"
+        class="mt-2.5 flex items-center gap-1.5 text-[11px] font-mono text-surface-400 dark:text-surface-500 break-all select-all"
+        title="作者 ID"
+      >
+        <i class="ri-user-3-line shrink-0 text-surface-400 dark:text-surface-500"></i>
+        <span>作者 {{ authorId }}</span>
       </div>
     </div>
 

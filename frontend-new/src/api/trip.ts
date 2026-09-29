@@ -127,7 +127,7 @@ export const tripApi = {
     return apiGet<Trip>(`/api/trips/shared/${token}`)
   },
 
-  getPublicTrips(params?: { page?: number; size?: number }) {
+  getPublicTrips(params?: { page?: number; size?: number; keyword?: string }) {
     return apiGet<TripListResponse>('/api/trips/public', params as Record<string, unknown>)
   },
 }
