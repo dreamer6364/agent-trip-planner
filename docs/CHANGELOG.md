@@ -11,6 +11,40 @@ TripForge 的所有重要变更都会记录在此文件中。
 
 ---
 
+## [1.23.0] - 2026-09-29
+
+### 功能增强
+
+- **每日正餐保底（只要时间允许，每天必有午餐+晚餐）**
+  - 背景：用户反馈「午餐晚餐丢失」——青岛1日 d1 仅早餐缺午晚、苏州3日 d3 全天无餐；根因链为 dedupe 跨天同名餐剔除 + ensureComplete 补餐被后续 dedupe 二次剔除 + 兜底位置过早（详见 `docs/BUGFIX.md` 1.23.0）
+  - 新增纯策略类 `DailyMealPlanner`：零打扰优先落位（空隙容 60 分钟 + travel 收缩 ≤15 分钟），无空隙则按 `fixTimeOverlaps` 同构级联推演（travel 先 15 后 0）；午目标 11:30（最晚 15:00）、晚 17:30（最晚 20:00），日窗 `[dayFloor, 21:00]`，越 21:00 即判「时间不允许」放弃——宁缺餐不删景点；返回原始目标时刻，实际落位交 `fixTimeOverlaps` 顺延
+  - `TripPlanningAgent` postPipeline 新增 `ensureDailyMealsStep`：插在 `applyPaceBudget` 之后、`annotateMealRestaurants` 之前（= 全流水线最后一次 dedupe 之后；其后注解/合规/校正/人性化/归一化/补时序/插休息均不删餐）；主路径与 inline 回退共用 postPipeline，故仅覆盖主路径（inline 回退自带窄窗午餐/晚餐逻辑，本轮未改，见已知限制）
+  - 餐名三级生成：用户点名餐厅 → `pickRestaurant` 15 轮消费 → 泛化名候选（`city+美食/本地美食/FOOD_KEYWORDS/修饰词`）；`mealNameAvailable` 对全程活动逐一 `samePlace` 判交，保证餐名过 trip-service `dedupeActivitiesForPersist` 同名全程去重关卡
+  - 餐次/餐厅识别统一 `mealBareName`（兼容前缀 `午餐·楼外楼`、后缀 `楼外楼·午餐`、裸名）与 `mealSlotOf`（餐次字优先、开始时间兜底）
+  - 文件：`plan-service/.../agent/DailyMealPlanner.java`（新增）、`plan-service/.../agent/TripPlanningAgent.java`
+
+### 修复
+
+- **午餐晚餐丢失根因修复**：ensureComplete `usedRestaurants` 收集改用 `mealBareName` 全活动遍历（后缀式 `X·午餐` 此前只取到「午餐」，致 pickRestaurant 漏防撞名被持久层剔除）；`hasLunch/hasDinner` 改 `mealSlotOf` 槽位口径（裸餐厅名按时间判餐次，避免误判缺餐反复补餐）；`enrichMealNames` 预置全程 `mealBareName` 种子防升级撞名——详见 `docs/BUGFIX.md` 1.23.0
+  - 文件：`plan-service/.../agent/TripPlanningAgent.java`
+
+### 验证方式与结果（2026-09-29）
+
+| 项 | 结果 |
+|---|---|
+| `DailyMealPlannerTest`（新增 12 用例） | 12/12 PASS ✓ |
+| plan-service 全套单测（含 RestSchedulePolicyTest / VariantExclusionsTest / PoiSearchFuzzyTest） | 48/48 PASS ✓ |
+| `repro-meal.js` 新建青岛1日 + 苏州3日 | 两案例全部天 `lunch=Y dinner=Y` ✓（苏州 d3 此前全天 0 餐）；日志确认保底触发（青岛补晚餐→泛化升级「肥三土菜馆」、苏州 d3 补午晚→午餐升级「端点烤翅」）✓ |
+| `verify-rest.js` 回归 | 28/28 PASS ✓ |
+| `verify-d.js` 回归 | 22/22 PASS ✓ |
+| `verify-variant.js` 回归 | 16/16 PASS ✓ |
+| `e2e-diversity.js` | PASS ✓（4 天午晚餐齐全、无占位名） |
+| `e2e-pace.js` 三档 | 首轮 moderate/relaxed PASS、compact 触发既有 `applyPaceBudget` 景点数上限裁剪致 day2 410min<450 下限（LLM 方差 flake，与本改动机制无关：保底步未触发、budget 逻辑未改）；`PACE=compact` 复跑 PASS（8.1h/8.0h）✓ |
+| 部署 | `mvn -o package -DskipTests` BUILD OK → 服务重启 → TCP 8081-8086 6/6 UP；无前端改动跳过 npm build/robocopy ✓ |
+| 部署附带 | `trip-planner-kafka` 启动时 ZK `NodeExists` 崩溃（exit 1）→ `docker restart zookeeper` + `start kafka` 恢复，消费组全部重新注册 ✓ |
+
+---
+
 ## [1.22.1] - 2026-09-29
 
 ### 功能增强

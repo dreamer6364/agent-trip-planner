@@ -2152,7 +2152,9 @@ public class TripPlanningAgent {
      * 新增/调整后处理只改这里；步骤内异常按语义选择吞掉或上抛。
      *
      * 顺序约束：enforceVariant 在真实路网修正前（改名后重新地理编码）；
-     * fillPaceGaps 在预算裁剪前；refill 在收口裁剪前。
+     * fillPaceGaps 在预算裁剪前；refill 在收口裁剪前；
+     * ensureDailyMealsStep 在最后一次去重（normalizeDailyMeals 后）与餐厅注解之间——
+     * 其后无任何去重步骤，补入的正餐不会被同名剔除（见 BUGFIX 1.23.0）。
      */
     private List<ActivityStep> postPipeline() {
         return List.<ActivityStep>of(
@@ -2172,6 +2174,8 @@ public class TripPlanningAgent {
                 // 节奏缺口填充（换版时候选池已剔除排除项）→ 活动频率预算
                 (acts, ctx) -> fillPaceGaps(acts, ctx.getCity(), ctx.getPace(), ctx.getExcludePois(), ctx.getRawInput()),
                 (acts, ctx) -> applyPaceBudget(acts, ctx.getPace()),
+                // 每日正餐保底：只要时间允许，每一天必须有午餐+晚餐（本步之后不再有去重步骤）
+                this::ensureDailyMealsStep,
                 // 餐厅注解（静态坐标 + 在线评分/人均/地址）
                 (acts, ctx) -> annotateMealRestaurants(acts, ctx.getCity()),
                 // 换版排除硬清洗（非换版 no-op；须在真实路网修正前）
@@ -2200,6 +2204,273 @@ public class TripPlanningAgent {
             log.warn("完整性兜底失败，保留原活动: {}", e.getMessage());
             return acts;
         }
+    }
+
+    /** 每日正餐保底步骤：只要时间允许，每一天都要有午餐+晚餐（失败保留原活动） */
+    private List<Map<String, Object>> ensureDailyMealsStep(List<Map<String, Object>> acts, PlanningContext ctx) {
+        try {
+            return ensureDailyMeals(acts, ctx.getCity(), ctx.getMeals(),
+                    ctx.getExcludePois(), ctx.getTimeStart());
+        } catch (Exception e) {
+            log.warn("每日正餐保底失败，保留原活动: {}", e.getMessage());
+            return acts;
+        }
+    }
+
+    /**
+     * 每日午/晚餐保底（结构定稿后的最终兜底）
+     *
+     * <p>此前正餐丢失的根因链：LLM 漏排 → 完整性兜底补出的餐次与既有餐厅同名，
+     * 被随后的全局同名去重剔除 → 兜底位置太靠前，其后仍有去重步骤。本步置于管道末段
+     * （最后一次去重之后、餐厅注解之前）：逐天检测缺失的午餐/晚餐，按 {@link DailyMealPlanner}
+     * 的时间允许判定落位（零打扰优先，级联后推越过 21:00 即放弃），命名与全程活动
+     * 等价判定不通过才采用，并避开已用餐厅与换版排除项——保证能通过落库侧
+     * 「同名餐厅全程去重 + 同日同餐次唯一」的口径。</p>
+     *
+     * @param timeStart 行程出发时刻（首日日窗口下界取 max(08:00, 出发时刻)）
+     */
+    private List<Map<String, Object>> ensureDailyMeals(List<Map<String, Object>> acts, String city,
+            List<Map<String, Object>> meals, List<String> excludePois, String timeStart) {
+        if (acts == null || acts.isEmpty()) {
+            return acts;
+        }
+        int firstFloor = DailyMealPlanner.DEFAULT_FLOOR_MIN;
+        try {
+            java.time.LocalTime dep = LocalDateTime.parse(timeStart).toLocalTime();
+            firstFloor = Math.max(firstFloor, dep.getHour() * 60 + dep.getMinute());
+        } catch (Exception ignore) {
+            // 出发时刻缺失/格式异常时按默认 08:00
+        }
+
+        // 全程已用主体名（餐名与景点名都参与，防止补餐与景点同名在落库侧被剔除）
+        List<String> allNames = new ArrayList<>();
+        Set<String> usedRestaurants = new HashSet<>();
+        for (Map<String, Object> a : acts) {
+            String n = String.valueOf(a.getOrDefault("name", a.getOrDefault("poi_name", ""))).trim();
+            if (n.isEmpty()) continue;
+            allNames.add(n);
+            String bare = mealBareName(n);
+            if (!bare.isBlank()) usedRestaurants.add(bare);
+        }
+
+        Map<Integer, List<Map<String, Object>>> byDay = new TreeMap<>();
+        for (Map<String, Object> a : acts) {
+            int day = toIntSafe(a.get("day"));
+            byDay.computeIfAbsent(day <= 0 ? 1 : day, k -> new ArrayList<>()).add(a);
+        }
+
+        int added = 0;
+        for (Map.Entry<Integer, List<Map<String, Object>>> entry : byDay.entrySet()) {
+            int day = entry.getKey();
+            List<Map<String, Object>> dayActs = entry.getValue();
+            dayActs.sort(Comparator.comparing(a -> String.valueOf(
+                    a.getOrDefault("startTime", a.getOrDefault("scheduled_start", "08:00")))));
+            Set<String> slots = new HashSet<>();
+            for (Map<String, Object> a : dayActs) {
+                String slot = mealSlotOf(a);
+                if (slot != null) slots.add(slot);
+            }
+            int dayFloor = day <= 1 ? firstFloor : DailyMealPlanner.DEFAULT_FLOOR_MIN;
+
+            for (boolean lunch : new boolean[]{true, false}) {
+                String slot = lunch ? "l" : "d";
+                if (slots.contains(slot)) continue;
+
+                List<DailyMealPlanner.Item> items = new ArrayList<>(dayActs.size());
+                for (Map<String, Object> a : dayActs) {
+                    items.add(toPlannerItem(a));
+                }
+                DailyMealPlanner.Placement p = DailyMealPlanner.plan(items, lunch, dayFloor);
+                if (p == null) {
+                    log.info("每日正餐保底: day{} {}餐时间不允许，跳过", day, lunch ? "午" : "晚");
+                    continue;
+                }
+                double[] ref = coordBefore(dayActs, p.index());
+                BackstopMeal named = backstopMealName(lunch, city, meals,
+                        usedRestaurants, allNames, excludePois,
+                        ref == null ? null : ref[0], ref == null ? null : ref[1]);
+                if (named == null) {
+                    log.warn("每日正餐保底: day{} {}餐无可用名称，跳过", day, lunch ? "午" : "晚");
+                    continue;
+                }
+                LocalTime start = LocalTime.of(Math.floorDiv(p.startMin(), 60), Math.floorMod(p.startMin(), 60));
+                Map<String, Object> meal = newAct(day, named.name(), "meal", start,
+                        DailyMealPlanner.MEAL_DURATION_MIN);
+                meal.put("travelTimeMin", p.travelMin());
+                meal.put("travelDistanceKm",
+                        Math.round(p.travelMin() * 0.067 * 10.0) / 10.0);
+                if (named.coord() != null) {
+                    meal.put("lat", named.coord()[0]);
+                    meal.put("lng", named.coord()[1]);
+                }
+                dayActs.add(meal);
+                dayActs.sort(Comparator.comparing(a -> String.valueOf(
+                        a.getOrDefault("startTime", a.getOrDefault("scheduled_start", "08:00")))));
+                slots.add(slot);
+                allNames.add(named.name());
+                String bare = mealBareName(named.name());
+                if (!bare.isBlank()) usedRestaurants.add(bare);
+                added++;
+                log.info("每日正餐保底: day{} 补入{}餐 {} ({} 起)", day,
+                        lunch ? "午" : "晚", named.name(), toHhMm(p.startMin()));
+            }
+        }
+        if (added == 0) {
+            return acts;
+        }
+        log.info("每日正餐保底完成: 补入 {} 顿正餐", added);
+        List<Map<String, Object>> out = new ArrayList<>(acts.size() + added);
+        for (List<Map<String, Object>> dayActs : byDay.values()) {
+            out.addAll(dayActs);
+        }
+        out.sort((a, b) -> {
+            int d1 = toIntSafe(a.get("day"));
+            int d2 = toIntSafe(b.get("day"));
+            if (d1 != d2) return Integer.compare(d1, d2);
+            return String.valueOf(a.getOrDefault("startTime", a.getOrDefault("scheduled_start", "00:00")))
+                    .compareTo(String.valueOf(b.getOrDefault("startTime", b.getOrDefault("scheduled_start", "00:00"))));
+        });
+        return out;
+    }
+
+    /** 补餐命名结果：名称 + 可用坐标（无则 null，由后续餐厅注解补全） */
+    private record BackstopMeal(String name, double[] coord) {
+    }
+
+    /**
+     * 补餐命名：用户点名餐厅 → 餐厅库挑选（循环消费规避排除项/重名）→ 泛化名唯一化兜底
+     *
+     * @return 无可用名称返回 null
+     */
+    private BackstopMeal backstopMealName(boolean lunch, String city, List<Map<String, Object>> meals,
+            Set<String> usedRestaurants, List<String> allNames, List<String> excludePois,
+            Double refLat, Double refLng) {
+        String mealType = lunch ? "lunch" : "dinner";
+        String slotWord = lunch ? "午餐" : "晚餐";
+        String pref = mealPreference(meals, mealType);
+        boolean hasExclude = excludePois != null && !excludePois.isEmpty();
+
+        // 1) 用户点名的餐厅（未用过、未被换版排除、与既有活动名不等价）
+        String specified = mealSpecifiedRestaurant(meals, mealType);
+        if (specified != null && !specified.isBlank()
+                && !usedRestaurants.contains(specified)
+                && !(hasExclude && isExcludedName(specified, excludePois))
+                && mealNameAvailable(slotWord + "·" + specified, allNames)) {
+            return new BackstopMeal(slotWord + "·" + specified, resolveCoord(specified, city, null));
+        }
+
+        // 2) 餐厅库挑选：pickRestaurant 每轮消费一个候选，落选者不会被重复选中
+        int guard = 15;
+        while (guard-- > 0) {
+            Map<String, Object> rest = pickRestaurant(city, pref, refLat, refLng, usedRestaurants);
+            if (rest == null) break;
+            String rn = String.valueOf(rest.get("name"));
+            if (hasExclude && isExcludedName(rn, excludePois)) continue;
+            String full = slotWord + "·" + rn;
+            if (!mealNameAvailable(full, allNames)) continue;
+            double[] coord = null;
+            if (rest.get("lat") instanceof Number && rest.get("lng") instanceof Number) {
+                coord = new double[]{((Number) rest.get("lat")).doubleValue(),
+                        ((Number) rest.get("lng")).doubleValue()};
+            }
+            return new BackstopMeal(full, coord);
+        }
+
+        // 3) 泛化名兜底（全程唯一；后续餐厅注解可升级为附近真实餐厅）
+        for (String label : genericMealLabels(city, pref)) {
+            String full = slotWord + "·" + label;
+            if (mealNameAvailable(full, allNames)) {
+                return new BackstopMeal(full, null);
+            }
+        }
+        return null;
+    }
+
+    /** 泛化餐名候选：口味 → 城市美食 → 本地美食 → 菜系关键词 → 城市+修饰组合 */
+    private List<String> genericMealLabels(String city, String pref) {
+        List<String> labels = new ArrayList<>();
+        if (pref != null && !pref.isBlank() && !isPlaceholderText(pref)) {
+            labels.add(pref);
+        }
+        String c = (city == null || city.isBlank()) ? "" : city;
+        if (!c.isEmpty()) labels.add(c + "美食");
+        labels.add("本地美食");
+        labels.addAll(FOOD_KEYWORDS);
+        if (!c.isEmpty()) {
+            for (String adj : List.of("口碑", "地道", "家常", "人气", "街头")) {
+                for (String noun : List.of("小馆", "菜馆", "餐厅")) {
+                    labels.add(c + adj + noun);
+                }
+            }
+        }
+        return labels;
+    }
+
+    /**
+     * 新餐名与既有活动名是否均不等价
+     *
+     * <p>判定口径与计划侧去重（samePlace）及落库侧（nameContains）一致：
+     * 归一化（去餐次前缀）后相等、或一方为另一方长度 ≥3 的包含，都视为撞名。</p>
+     */
+    private boolean mealNameAvailable(String candidate, List<String> allNames) {
+        for (String n : allNames) {
+            if (n != null && !n.isBlank() && samePlace(candidate, n)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** 取名称中的餐厅/景点主体：「午餐·楼外楼」「楼外楼·午餐」→「楼外楼」；无餐次词返回原文 */
+    private String mealBareName(String name) {
+        if (name == null || name.isBlank()) return "";
+        String n = name.trim();
+        if (!n.contains("·")) return stripMealPrefix(n);
+        String head = n.substring(0, n.indexOf('·')).trim();
+        String tail = n.substring(n.indexOf('·') + 1).trim();
+        if (isMealSlotWord(head)) return tail;
+        if (isMealSlotWord(tail)) return head;
+        return tail;
+    }
+
+    private boolean isMealSlotWord(String s) {
+        return "早餐".equals(s) || "午餐".equals(s) || "晚餐".equals(s)
+                || "早饭".equals(s) || "午饭".equals(s) || "晚饭".equals(s) || "夜宵".equals(s);
+    }
+
+    /** 活动的餐次 slot（b/l/d）：非餐返回 null；名称餐次字优先（早/晚/午），其次按开始时间推断 */
+    private String mealSlotOf(Map<String, Object> a) {
+        String type = String.valueOf(a.getOrDefault("type", a.getOrDefault("activity_type", "visit")));
+        if ("breakfast".equals(type)) return "b";
+        if (!"meal".equals(type) && !"restaurant".equals(type)) return null;
+        String name = String.valueOf(a.getOrDefault("name", a.getOrDefault("poi_name", "")));
+        if (name.contains("早")) return "b";
+        if (name.contains("晚")) return "d";
+        if (name.contains("午")) return "l";
+        return inferMealSlotFromTime(parseTimeSafe(String.valueOf(
+                a.getOrDefault("startTime", a.getOrDefault("scheduled_start", "08:00")))));
+    }
+
+    /** 活动转为时间策略条目（时间/时长/路程，解析失败按 08:00/60 分钟/0） */
+    private DailyMealPlanner.Item toPlannerItem(Map<String, Object> a) {
+        int s = toMinuteOfDay(a.containsKey("startTime") ? a.get("startTime") : a.get("scheduled_start"));
+        if (s < 0) s = DailyMealPlanner.DEFAULT_FLOOR_MIN;
+        int dur = toIntSafe(a.get(durationKey(a)));
+        if (dur <= 0) dur = 60;
+        int travel = toIntSafe(a.getOrDefault("travelTimeMin", a.get("travel_duration_min")));
+        return new DailyMealPlanner.Item(s, dur, Math.max(0, travel));
+    }
+
+    /** 指定下标之前的最后一个活动坐标（就近选餐厅的参考点）；无坐标返回 null */
+    private double[] coordBefore(List<Map<String, Object>> dayActs, int index) {
+        for (int i = Math.min(index, dayActs.size()) - 1; i >= 0; i--) {
+            Map<String, Object> a = dayActs.get(i);
+            if (a.get("lat") instanceof Number && a.get("lng") instanceof Number) {
+                return new double[]{((Number) a.get("lat")).doubleValue(),
+                        ((Number) a.get("lng")).doubleValue()};
+            }
+        }
+        return null;
     }
 
     /** 换版排除硬清洗步骤：清洗 LLM/兜底重新引入的排除项（非换版为 no-op） */
@@ -2567,6 +2838,13 @@ public class TripPlanningAgent {
                                                       List<Map<String, Object>> meals, String city) {
         if (activities == null || activities.isEmpty()) return activities;
         Set<String> usedRestaurants = new HashSet<>();
+        // 预置全程已出现的餐厅/景点主体：改名或补名时避开，防止复用同名餐厅
+        // 被随后的全局同名去重剔除（后缀式「楼外楼·午餐」此前只取到「午餐」，见 BUGFIX 1.23.0）
+        for (Map<String, Object> x : activities) {
+            String bare = mealBareName(String.valueOf(
+                    x.getOrDefault("name", x.getOrDefault("poi_name", ""))));
+            if (!bare.isBlank()) usedRestaurants.add(bare);
+        }
         Double prevLat = null;
         Double prevLng = null;
         List<Map<String, Object>> sorted = new ArrayList<>(activities);
@@ -2936,12 +3214,14 @@ public class TripPlanningAgent {
         removeExcludedFromPool(cityPool, excludePois, rawInput);
         int poolIdx = 0;
         Set<String> usedRestaurants = new HashSet<>();
-        // 已出现的餐厅（如午餐·楼外楼）禁止在补晚餐时复用，避免补出的餐次被去重剔除
+        // 全程已出现的餐厅/景点主体（兼容「午餐·楼外楼」与「楼外楼·午餐」两种写法）：
+        // 补餐时避开，防止补出的同名餐次被后续全局同名去重剔除（见 BUGFIX 1.23.0）
         if (activities != null) {
             for (Map<String, Object> a : activities) {
-                String n = String.valueOf(a.getOrDefault("name", a.getOrDefault("poi_name", "")));
-                if (n.contains("·")) {
-                    usedRestaurants.add(n.substring(n.indexOf('·') + 1));
+                String bare = mealBareName(String.valueOf(
+                        a.getOrDefault("name", a.getOrDefault("poi_name", ""))));
+                if (!bare.isBlank()) {
+                    usedRestaurants.add(bare);
                 }
             }
         }
@@ -2957,12 +3237,15 @@ public class TripPlanningAgent {
                 }
             }
 
-            boolean hasLunch = dayActs.stream().anyMatch(a -> "meal".equals(String.valueOf(
-                            a.getOrDefault("type", a.getOrDefault("activity_type", ""))))
-                    && String.valueOf(a.getOrDefault("name", a.getOrDefault("poi_name", ""))).contains("午"));
-            boolean hasDinner = dayActs.stream().anyMatch(a -> "meal".equals(String.valueOf(
-                            a.getOrDefault("type", a.getOrDefault("activity_type", ""))))
-                    && String.valueOf(a.getOrDefault("name", a.getOrDefault("poi_name", ""))).contains("晚"));
+            // 餐次检测与归一化/保底同口径：名称餐次字（早/晚/午）优先，其次按开始时间推断
+            // （裸餐厅名如「楼外楼」18:00 按时间即为晚餐，避免误判缺餐造成补餐反复）
+            java.util.Set<String> slots = new java.util.HashSet<>();
+            for (Map<String, Object> a : dayActs) {
+                String slot = mealSlotOf(a);
+                if (slot != null) slots.add(slot);
+            }
+            boolean hasLunch = slots.contains("l");
+            boolean hasDinner = slots.contains("d");
             long visitCount = dayActs.stream().filter(a -> {
                 String t = String.valueOf(a.getOrDefault("type", a.getOrDefault("activity_type", "")));
                 return !"meal".equals(t) && !"transit".equals(t) && !"breakfast".equals(t);

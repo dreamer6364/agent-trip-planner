@@ -11,6 +11,32 @@ TripForge 的所有 Bug 修复都会记录在此文件中。
 
 ---
 
+## [1.23.0] - 2026-09-29
+
+### 修复
+
+- **午餐晚餐丢失（缺餐/整日无餐）——根因链修复 + 每日正餐保底**
+  - **现象**：青岛1日 d1 仅早餐缺午晚（`7d4fec4b...` 复现）、苏州3日 d3 全天无餐（`9fa58754...` 复现）；日志实锤 `活动去重: 8 -> 6, 剔除: [meal:青岛啤酒街海鲜大排档·午餐/·晚餐]`（跨天同名剔除）与 `20 -> 17, 剔除: [..., meal:午餐·松鹤楼, meal:晚餐·得月楼]`（ensureComplete 补餐被 step10 二次剔除）
+  - **根因 1（收集缺陷）**：ensureComplete `usedRestaurants` 按名称取餐厅名，后缀式 `X·午餐` 只取到「午餐」→ `pickRestaurant` 漏防同餐厅 → 生成餐名与既有活动同名 → 持久层 `dedupeActivitiesForPersist` 同名全程去重剔除。修复：改用 `mealBareName`（兼容前缀/后缀/裸名）遍历**全部**活动收集（含景点名，防 meal-vs-visit 撞名）
+  - **根因 2（餐次口径）**：`hasLunch/hasDinner` 此前用名称子串「午/晚」判断，裸餐厅名（如「楼外楼」18:00）误判缺餐造成补餐反复。修复：改 `mealSlotOf` 槽位口径（type=breakfast→b，名称餐次字 早/晚/午 优先，否则按开始时间推断），与 `normalizeDailyMeals`/保底步同口径
+  - **根因 3（升级撞名）**：`enrichMealNames` 泛化升级时 `usedRestaurants` 未预置既有餐名，可能升级出同名餐厅。修复：预置全程 `mealBareName` 种子
+  - **根因 4（兜底位置过早）**：原兜底在最后一次 dedupe 之前，补餐被二次剔除。修复：新增 `ensureDailyMealsStep` 置于 postPipeline 最后一次 dedupe 之后（`applyPaceBudget` 与 `annotateMealRestaurants` 之间），其后所有步骤均不删餐
+  - **已知限制**：inline 回退路径（`InlinePlanningService`）不走 postPipeline、自带窄窗午餐/晚餐逻辑，本轮未覆盖；存量缺餐行程需重新规划一次才生效
+  - 文件：`plan-service/.../agent/TripPlanningAgent.java`、`plan-service/.../agent/DailyMealPlanner.java`（新增）
+
+### 验证方式与结果（2026-09-29）
+
+| 项 | 结果 |
+|---|---|
+| `DailyMealPlannerTest` | 12/12 PASS ✓ |
+| plan-service 全套单测 | 48/48 PASS ✓ |
+| `repro-meal.js`（青岛1日 + 苏州3日 新建） | 全部天 lunch+dinner 齐全并成功落库 ✓ |
+| `verify-rest.js` / `verify-d.js` / `verify-variant.js` | 28/28、22/22、16/16 PASS ✓ |
+| `e2e-diversity.js` / `e2e-pace.js`(PACE=compact 复跑) | PASS / PASS ✓ |
+| `e2e-pace.js` 首轮 compact day2 410min<450 | 既有 `applyPaceBudget` 按景点数上限（7>6）裁剪 60 分钟未校验时长下限所致，LLM 方差触发的 flake；机制上与本改动无关（该轮保底步未触发、budget 逻辑未改），复跑 PASS；**未在本轮修复**（已知问题） |
+
+---
+
 ## [1.22.1] - 2026-09-29
 
 ### 修复
