@@ -1058,7 +1058,7 @@ public class TripService {
                     }
                     if (!dup) {
                         for (String prev : seenVisit) {
-                            if (key.equals(normalizeActivityName(prev)) || nameContains(name, prev)) {
+                            if (key.equals(normalizeActivityName(prev))) {
                                 dup = true;
                                 break;
                             }
@@ -1081,7 +1081,7 @@ public class TripService {
                     }
                     if (!dup) {
                         for (String prev : seenMeal) {
-                            if (key.equals(normalizeActivityName(prev)) || nameContains(name, prev)) {
+                            if (key.equals(normalizeActivityName(prev))) {
                                 dup = true;
                                 break;
                             }

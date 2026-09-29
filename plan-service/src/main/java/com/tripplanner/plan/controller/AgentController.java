@@ -34,7 +34,7 @@ public class AgentController {
     @Value("${zhipu.api-key:${llm.api-key:}}")
     private String apiKey;
 
-    @Value("${zhipu.model:${llm.model:glm-4-flash}}")
+    @Value("${zhipu.model:${llm.model:glm-4.5-flash}}")
     private String model;
 
     @Value("${zhipu.base-url:${llm.base-url:https://open.bigmodel.cn/api/paas/v4}}")
@@ -87,9 +87,11 @@ public class AgentController {
 
         log.info("收到ReAct规划请求: rawInput={}", rawInput);
 
+        // ReAct 循环依赖工具调用，仍走 OpenAiChatModel 并固定旧模型 glm-4-flash：
+        // 主流程已切 glm-4.5-flash（推理模型，工具路径无法注入关闭思考参数，见 ZhipuChatModel）
         ChatLanguageModel chatModel = OpenAiChatModel.builder()
                 .apiKey(apiKey)
-                .modelName(model)
+                .modelName("glm-4-flash")
                 .baseUrl(baseUrl)
                 .temperature(0.7)
                 .timeout(java.time.Duration.ofSeconds(180))

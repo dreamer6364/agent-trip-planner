@@ -11,6 +11,43 @@ TripForge 的所有重要变更都会记录在此文件中。
 
 ---
 
+## [1.24.0] - 2026-09-29
+
+### 优化（AI 规划提速：单行程端到端典型 ~170s → 24-75s，行程 LLM 55-107s → 4-26s）
+
+- **切换规划模型 `glm-4-flash` → `glm-4.5-flash`（禁用思考）**
+  - glm-4.5 为推理模型，不关思考会烧光输出预算返回空（实测 135.5s 空输出）。新建 `ZhipuChatModel`（langchain4j 0.35 `ChatLanguageModel` HTTP 直连，须同时覆写 `chat(ChatRequest)` 与 abstract `generate(List<ChatMessage>)`），按模型名前缀（`glm-4.5/4.6/5`）注入 `thinking={"type":"disabled"}`（OpenAiChatModel builder 无 extra-body 参数）；仅记调用摘要日志（替代 logRequests/logResponses），瞬时故障（网络/429/5xx/空内容）重试 2 次，业务错误码（1113/1211）不重试
+  - bench 实测：glm-4.5-flash slim+nothink 28.5s/803 tokens（glm-4-flash 同条件 69.3s/1088）
+  - `AgentController /react-plan` 工具调用路径固定 `glm-4-flash`（该路径无法注入关思考参数）
+  - 文件：`plan-service/.../agent/ZhipuChatModel.java`（新增）、`plan-service/.../agent/TripPlanningAgent.java`、`plan-service/.../controller/AgentController.java`、`plan-service/src/main/resources/application.yml`
+- **距离矩阵本地化**：主路径 `buildRealDistanceMatrix`（108 次高德路线调用，QPS=5 限速 200ms/次、冷缓存 12-21s）→ `buildStraightLineMatrix`（本地直线距离，3ms-1.1s）；真实路网仍由 `correctStep` 统一修正（e2e-distance RECALC_OK 不变）；删除 `buildMatrixBlock`/`recommendMode`（`GeocodeService` QPS=3 须串行，并行 geocode 与 planExecutor 调优均无收益，已放弃）
+  - 文件：`TripPlanningAgent.java`
+- **行程 schema 瘦身 + 字段水合**：主 prompt/`planSingleDay` 输出改为 `{day,name,startTime,durationMin}` 四字段——`durationMin` 必须保留（3 字段版由水合用 parse 大时长兜底，导致日超预算、21:00 裁尾、访问数掉 band），让 LLM 自调节奏；其余字段 `hydrateActivity` 从 places/meals 水合（type/priority/travel/endTime 合成）；新增 `estimateTravelTimes` 按本地坐标（place 坐标 → geoNameCache → CITY_RESTAURANTS）预估相邻段交通供时间窗步骤使用；prompt 压缩至 2.0-3.4k 字符（原 6-8k），响应 0.4-1.6k 字符
+  - 文件：`TripPlanningAgent.java`
+- **行程 JSON 解析失败自动重试 1 次**：glm-4.5 偶发输出不合法 JSON（缺逗号/引号），原直接落入 inline 回退（不走 postPipeline，正餐/水合缺失）；现 `parseItineraryJson` 失败即重调 LLM 一次，仍失败才回退。验证中实际触发：attempt=1 解析失败 → attempt=2 成功（18.6s）
+  - 文件：`TripPlanningAgent.java`
+
+### 修复
+
+- **持久层误杀嵌套名正餐**：`dedupeActivitiesForPersist` 餐食 vs 景点用 `nameContains` 包含判定，「晚餐·青岛老城海鲜馆」包含景点「青岛老城」被剔（6→5 缺晚餐）；按文档口径「等价视为重复」改为归一化后精确相等（meal-vs-visit 双向），同名餐厅全程去重与同日同餐次唯一口径不变——详见 `docs/BUGFIX.md` 1.24.0
+  - 文件：`trip-service/.../service/TripService.java`
+- **21:00 裁剪后每日景点数掉至节奏下限以下**：`belowPaceFloor` 只看游览时长不看景点数，时长达标但 21:00 裁剪把 visits 裁到下限以下时 `refillStep` 不触发（e2e-pace moderate day1 3→2 FAIL）；补入 `visitCount < pace.getMinVisits()` 判定（`fillDayGaps` 本身已按数量+时长双下限、21:00 窗口内插入）——详见 `docs/BUGFIX.md` 1.24.0
+  - 文件：`TripPlanningAgent.java`
+
+### 验证方式与结果（2026-09-29）
+
+| 项 | 结果 |
+|---|---|
+| plan-service 单测 | 48/48 PASS ✓ |
+| trip-service 单测 | 19/19 PASS ✓ |
+| `e2e-pace.js` | PASS（compact 4+4、moderate 3+4、relaxed 2+2，band/cnt/预算全 OK）✓ |
+| `repro-meal.js`（青岛1日+苏州3日，修复后两轮） | 全部天 lunch=Y dinner=Y ✓（「青岛老城海鲜馆」过嵌套名去重关卡）✓ |
+| `e2e-dedupe.js` | PASS（无重复景点/餐食、楼外楼在、河坊街 visit+meal 共存）✓ |
+| `e2e-diversity.js` | PASS（5 类目、4 天正餐全、无占位名）✓ |
+| `e2e-distance.js` | RECALC_OK（西湖→雷峰塔 6.2km/55min 等真实路网修正正常）✓ |
+| `verify-rest.js` / `verify-d.js` / `verify-variant.js` | 28/28、22/22、16/16 PASS ✓ |
+| 耗时对比（本轮日志） | 行程 LLM 4-26s（多数 attempt=1，原 55-107s）；解析 LLM 典型 5-16s（原 13-23s）；矩阵 3ms-1.1s（原 12-21s）；e2e-pace 单行程 32s（原 ~170s，并发负载下最高 ~110s）✓ |
+
 ## [1.23.0] - 2026-09-29
 
 ### 功能增强

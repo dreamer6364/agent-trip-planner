@@ -12,7 +12,6 @@ import com.tripplanner.plan.service.RestaurantSearchService;
 import com.tripplanner.plan.service.RouteService;
 import com.tripplanner.plan.service.WebSearchService;
 import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.service.AiServices;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -211,16 +210,8 @@ public class TripPlanningAgent {
 
     @PostConstruct
     public void init() {
-        chatModel = OpenAiChatModel.builder()
-                .apiKey(apiKey)
-                .modelName(model)
-                .baseUrl(baseUrl)
-                .temperature(0.3)
-                .timeout(java.time.Duration.ofSeconds(180))
-                .maxTokens(4096)
-                .logRequests(true)
-                .logResponses(true)
-                .build();
+        // 自建直连实现：自动关闭 glm-4.5+ 推理模型思考（见 ZhipuChatModel），实测行程生成 96s→28s
+        chatModel = new ZhipuChatModel(baseUrl, apiKey, model, 0.3, 4096, java.time.Duration.ofSeconds(180));
 
         tripPlanningService = AiServices.builder(TripPlanningService.class)
                 .chatLanguageModel(chatModel)
@@ -2006,14 +1997,18 @@ public class TripPlanningAgent {
         places = sortPlacesByProximity(places, city, mentioned);
 
         log.info("开始生成详细行程规划，景点数: {}, 餐次: {}", places.size(), meals.size());
+        // 提速：不再预调高德路线 API 构建三方式矩阵（QPS=5 限速下冷缓存 12~21s，且结果只喂提示词、
+        // 最终交通时间由 correctStep 真实路网修正统一覆盖），改用本地直线距离供 LLM 就近排序
         String realDistanceMatrix;
+        long matrixStart = System.currentTimeMillis();
         try {
-            realDistanceMatrix = buildRealDistanceMatrix(places, meals, city);
-            log.info("=== 距离矩阵构建完成 ===\n{}", realDistanceMatrix);
+            realDistanceMatrix = buildStraightLineMatrix(places, meals, city);
         } catch (Exception e) {
-            log.warn("构建真实距离矩阵失败，使用传入矩阵: {}", e.getMessage());
+            log.warn("构建直线距离矩阵失败，使用传入矩阵: {}", e.getMessage());
             realDistanceMatrix = distanceMatrix;
         }
+        log.info("距离矩阵(本地直线)构建完成: 耗时{}ms, {}字符",
+                System.currentTimeMillis() - matrixStart, realDistanceMatrix.length());
 
         Map<String, Object> result = new HashMap<>();
         List<Map<String, Object>> activities = new ArrayList<>();
@@ -2023,49 +2018,33 @@ public class TripPlanningAgent {
         try {
             String prompt = buildItineraryPrompt(rawInput, places, meals, timeStart, timeEnd,
                     realDistanceMatrix, city, pace, variantSpec);
-            long llmStart = System.currentTimeMillis();
-            String response = tripPlanningService.planItinerary(prompt);
-            log.info("行程LLM完成: 耗时{}ms, prompt={}字符, 响应={}字符",
-                    System.currentTimeMillis() - llmStart, prompt.length(), response.length());
-            log.debug("LLM行程规划响应: {}", response);
-
-            // Parse JSON response
             ObjectMapper mapper = new ObjectMapper();
-            String cleaned = response.trim()
-                    .replaceAll("```json\\s*", "").replaceAll("```\\s*", "")
-                    .replaceAll("^[^{\\[]*", "").replaceAll("[^}\\]]*$", "")
-                    .trim();
-
-            JsonNode root;
-            try {
-                root = mapper.readTree(cleaned);
-            } catch (Exception e) {
-                int start = response.indexOf('{');
-                int end = response.lastIndexOf('}');
-                if (start >= 0 && end > start) {
-                    root = mapper.readTree(response.substring(start, end + 1));
-                } else {
-                    throw e;
+            JsonNode root = null;
+            Exception parseFailure = null;
+            for (int attempt = 1; attempt <= 2; attempt++) {
+                long llmStart = System.currentTimeMillis();
+                String response = tripPlanningService.planItinerary(prompt);
+                log.info("行程LLM完成: 耗时{}ms, prompt={}字符, 响应={}字符, attempt={}",
+                        System.currentTimeMillis() - llmStart, prompt.length(), response.length(), attempt);
+                log.debug("LLM行程规划响应: {}", response);
+                try {
+                    root = parseItineraryJson(response, mapper);
+                    break;
+                } catch (Exception e) {
+                    parseFailure = e;
+                    log.warn("行程LLM响应JSON解析失败(第{}次): {}", attempt, e.getMessage());
                 }
             }
+            if (root == null) {
+                throw new IllegalStateException("行程LLM响应JSON解析失败", parseFailure);
+            }
 
-            // Extract activities
+            // Extract activities：LLM 仅输出 day/name/startTime（瘦身 schema 提速），
+            // 其余字段按解析地点与餐饮配置水合；模型若仍返回全字段则优先采用模型值（兼容旧行为）
             activities.clear();
             if (root.has("activities")) {
                 for (JsonNode act : root.get("activities")) {
-                    Map<String, Object> a = new HashMap<>();
-                    a.put("day", act.has("day") ? act.get("day").asInt() : 1);
-                    a.put("name", act.has("name") ? act.get("name").asText() : "");
-                    a.put("type", act.has("type") ? act.get("type").asText() : "visit");
-                    a.put("startTime", act.has("startTime") ? act.get("startTime").asText() : "");
-                    a.put("endTime", act.has("endTime") ? act.get("endTime").asText() : "");
-                    a.put("durationMin", act.has("durationMin") ? act.get("durationMin").asInt() : 60);
-                    a.put("transportToNext", act.has("transportToNext") ? act.get("transportToNext").asText() : "");
-                    a.put("travelTimeMin", act.has("travelTimeMin") ? act.get("travelTimeMin").asInt() : 0);
-                    a.put("travelDistanceKm", act.has("travelDistanceKm") ? act.get("travelDistanceKm").asDouble() : 0.0);
-                    a.put("priority", act.has("priority") ? act.get("priority").asText() : "recommended");
-                    a.put("notes", act.has("notes") ? act.get("notes").asText() : "");
-                    activities.add(a);
+                    activities.add(hydrateActivity(act, places, meals, null));
                 }
             }
 
@@ -2138,6 +2117,9 @@ public class TripPlanningAgent {
      */
     private List<Map<String, Object>> runPostPipeline(List<Map<String, Object>> activities, PlanningContext ctx) {
         List<Map<String, Object>> acts = activities;
+        // 提速预处理：瘦身 schema 后 LLM 不再输出交通字段，correctStep 真实路网修正之前的
+        // 时间窗口步骤（fillPaceGaps 等）需要非零交通估算，先按本地坐标补齐（不发 API）
+        estimateTravelTimes(acts, ctx.getCity(), ctx.getPlaces());
         for (ActivityStep step : postPipeline()) {
             acts = step.apply(acts, ctx);
         }
@@ -3454,7 +3436,7 @@ public class TripPlanningAgent {
             byDay.computeIfAbsent(day <= 0 ? 1 : day, k -> new ArrayList<>()).add(a);
         }
         for (List<Map<String, Object>> dayActs : byDay.values()) {
-            if (visitMinutes(dayActs) < target) {
+            if (visitMinutes(dayActs) < target || visitCount(dayActs) < pace.getMinVisits()) {
                 return true;
             }
         }
@@ -4101,7 +4083,7 @@ public class TripPlanningAgent {
                 %s
                 餐饮:
                 %s
-                路线参考:
+                景点间直线距离（就近排序参考）:
                 %s
 
                 要求:
@@ -4116,8 +4098,8 @@ public class TripPlanningAgent {
                 9. 禁止生成独立的"餐食/美食"栏目，餐食只能是 type=meal 的午餐/晚餐活动
                 10. 【活动频率硬约束】本次节奏：%s；游览景点 %d-%d 个、每日游览时长(不含用餐与交通)%s，宁可把间隙留给交通与休息也不要硬塞景点
 
-                输出严格JSON:
-                {"activities":[{"day":%d,"name":"...","type":"visit/meal","startTime":"08:00","endTime":"10:00","durationMin":120,"transportToNext":"walk","travelTimeMin":10,"travelDistanceKm":1.0,"priority":"recommended","notes":"..."}]}
+                输出严格JSON（输出 day/name/startTime/durationMin 四个字段；交通与结束时间由系统自动计算）:
+                {"activities":[{"day":%d,"name":"...","startTime":"08:00","durationMin":90}]}
                 """,
                 dayNum, totalDays, dayNum,
                 rawInput, timeStart, timeEnd,
@@ -4154,19 +4136,7 @@ public class TripPlanningAgent {
         List<Map<String, Object>> acts = new ArrayList<>();
         if (root.has("activities")) {
             for (JsonNode act : root.get("activities")) {
-                Map<String, Object> a = new HashMap<>();
-                a.put("day", dayNum);
-                a.put("name", act.has("name") ? act.get("name").asText() : "");
-                a.put("type", act.has("type") ? act.get("type").asText() : "visit");
-                a.put("startTime", act.has("startTime") ? act.get("startTime").asText() : "");
-                a.put("endTime", act.has("endTime") ? act.get("endTime").asText() : "");
-                a.put("durationMin", act.has("durationMin") ? act.get("durationMin").asInt() : 60);
-                a.put("transportToNext", act.has("transportToNext") ? act.get("transportToNext").asText() : "walk");
-                a.put("travelTimeMin", act.has("travelTimeMin") ? act.get("travelTimeMin").asInt() : 10);
-                a.put("travelDistanceKm", act.has("travelDistanceKm") ? act.get("travelDistanceKm").asDouble() : 1.0);
-                a.put("priority", act.has("priority") ? act.get("priority").asText() : "recommended");
-                a.put("notes", act.has("notes") ? act.get("notes").asText() : "");
-                acts.add(a);
+                acts.add(hydrateActivity(act, places, meals, dayNum));
             }
         }
         return acts;
@@ -4277,191 +4247,244 @@ public class TripPlanningAgent {
     }
 
     /**
-     * 使用高德API构建真实距离矩阵（多交通方式）
-     * 节点 = 景点 + 指定餐厅（餐厅参与两两路段计算）
+     * 构建本地直线距离矩阵文本（性能优化 1.24.0：替代高德三方式矩阵）。
+     * 节点 = 景点 + 指定餐厅；坐标只取本地缓存/内置表（就近排序阶段已地理编码全部景点），
+     * 指定餐厅未命中内置表才地理编码（≤餐次数次调用）。
+     * 仅供 LLM 就近排序参考；真实交通时间由 correctActivitiesWithRealData 统一计算。
+     *
      * @param places 景点列表（需包含name字段）
      * @param meals 餐次列表（restaurant 字段为指定餐厅名，可选）
-     * @param city 城市名称（用于公交规划）
-     * @return 格式化的距离矩阵字符串（包含所有交通方式和推荐）
+     * @param city 城市名称
+     * @return 景点两两直线距离文本（坐标不足时返回提示语）
      */
-    private String buildRealDistanceMatrix(List<Map<String, Object>> places, List<Map<String, Object>> meals, String city) {
-        List<String> placeNames = new ArrayList<>();
+    private String buildStraightLineMatrix(List<Map<String, Object>> places, List<Map<String, Object>> meals, String city) {
+        List<String> nodeNames = new ArrayList<>();
+        Map<String, double[]> coords = new LinkedHashMap<>();
         if (places != null) {
             for (Map<String, Object> p : places) {
                 String name = String.valueOf(p.getOrDefault("name", "")).trim();
-                if (!name.isEmpty() && !placeNames.contains(name)) {
-                    placeNames.add(name);
+                if (name.isEmpty() || nodeNames.contains(name)) {
+                    continue;
+                }
+                nodeNames.add(name);
+                double[] c = estimateCoord(name, city, places);
+                if (c != null) {
+                    coords.put(name, c);
                 }
             }
         }
         if (meals != null) {
             for (Map<String, Object> m : meals) {
                 Object rest = m.get("restaurant");
-                if (rest == null || isPlaceholderText(String.valueOf(rest))) continue;
-                String name = String.valueOf(rest).trim();
-                if (!name.isEmpty() && !placeNames.contains(name)) {
-                    placeNames.add(name);
-                }
-            }
-        }
-        if (placeNames.size() < 2) {
-            return "景点不足，无法构建距离矩阵";
-        }
-
-        // Step 1: 对每个节点（景点+餐厅）并行地理编码获取坐标
-        List<CompletableFuture<double[]>> coordFutures = new ArrayList<>(placeNames.size());
-        for (String name : placeNames) {
-            coordFutures.add(CompletableFuture.supplyAsync(() -> resolveNodeCoord(name, city), planExecutor));
-        }
-        List<double[]> coordinates = new ArrayList<>(placeNames.size());
-        for (CompletableFuture<double[]> f : coordFutures) {
-            coordinates.add(f.join());
-        }
-
-        // Step 2: 每对节点并行查询三种交通方式（按节点对顺序拼装，保证输出稳定）
-        List<CompletableFuture<String>> pairFutures = new ArrayList<>();
-        for (int i = 0; i < placeNames.size(); i++) {
-            for (int j = i + 1; j < placeNames.size(); j++) {
-                if (coordinates.get(i) == null || coordinates.get(j) == null) {
+                if (rest == null || isPlaceholderText(String.valueOf(rest))) {
                     continue;
                 }
-                final double[] from = coordinates.get(i);
-                final double[] to = coordinates.get(j);
-                final String fromName = placeNames.get(i);
-                final String toName = placeNames.get(j);
-                pairFutures.add(CompletableFuture.supplyAsync(
-                        () -> buildMatrixBlock(fromName, toName, from, to, city), planExecutor));
+                String name = String.valueOf(rest).trim();
+                if (name.isEmpty() || nodeNames.contains(name)) {
+                    continue;
+                }
+                nodeNames.add(name);
+                double[] c = estimateCoord(name, city, places);
+                if (c == null) {
+                    double[] node = resolveNodeCoord(name, city); // [lng, lat]
+                    c = node == null ? null : new double[]{node[1], node[0]};
+                }
+                if (c != null) {
+                    coords.put(name, c);
+                }
             }
+        }
+        if (coords.size() < 2) {
+            return "景点间坐标不足，暂无距离参考";
         }
         StringBuilder matrix = new StringBuilder();
-        for (CompletableFuture<String> pf : pairFutures) {
-            matrix.append(pf.join());
-        }
-
-        String result = matrix.toString();
-        if (result.isEmpty()) {
-            return "无法获取景点间路线信息，请检查景点名称是否正确";
-        }
-        return result;
-    }
-
-    /**
-     * 查询单对节点的步行/公交/驾车路线并格式化为距离矩阵文本块。
-     * 作为并行执行单元（planExecutor），返回空串表示无可用路线。
-     */
-    private String buildMatrixBlock(String fromName, String toName, double[] from, double[] to, String city) {
-        double straightDistance = geoDistance(from[1], from[0], to[1], to[0]);
-        Map<String, Map<String, Object>> allModes = new HashMap<>();
-
-        try {
-            RouteResponse walkRoute = routeService.route(from[1], from[0], to[1], to[0], "walk");
-            if (walkRoute != null && walkRoute.isSuccess()) {
-                Map<String, Object> walkInfo = new HashMap<>();
-                walkInfo.put("time", (int) Math.ceil(walkRoute.getDuration() / 60.0));
-                walkInfo.put("dist", walkRoute.getDistance() / 1000.0);
-                allModes.put("walk", walkInfo);
+        List<String> names = new ArrayList<>(coords.keySet());
+        for (int i = 0; i < names.size(); i++) {
+            for (int j = i + 1; j < names.size(); j++) {
+                double[] from = coords.get(names.get(i));
+                double[] to = coords.get(names.get(j));
+                double km = geoDistance(from[0], from[1], to[0], to[1]) / 1000.0;
+                matrix.append(String.format("【%s → %s】直线距离: %.1fkm%n",
+                        names.get(i), names.get(j), km));
             }
-        } catch (Exception e) {
-            log.debug("步行路线获取失败: {} -> {}", fromName, toName);
         }
-
-        try {
-            RouteResponse transitRoute = routeService.route(from[1], from[0], to[1], to[0], "transit", city);
-            if (transitRoute != null && transitRoute.isSuccess()) {
-                Map<String, Object> transitInfo = new HashMap<>();
-                transitInfo.put("time", (int) Math.ceil(transitRoute.getDuration() / 60.0));
-                transitInfo.put("dist", transitRoute.getDistance() / 1000.0);
-                transitInfo.put("cost", transitRoute.getCost());
-                allModes.put("transit", transitInfo);
-            }
-        } catch (Exception e) {
-            log.debug("公交路线获取失败: {} -> {}", fromName, toName);
-        }
-
-        try {
-            RouteResponse driveRoute = routeService.route(from[1], from[0], to[1], to[0], "drive");
-            if (driveRoute != null && driveRoute.isSuccess()) {
-                Map<String, Object> driveInfo = new HashMap<>();
-                driveInfo.put("time", (int) Math.ceil(driveRoute.getDuration() / 60.0));
-                driveInfo.put("dist", driveRoute.getDistance() / 1000.0);
-                allModes.put("drive", driveInfo);
-            }
-        } catch (Exception e) {
-            log.debug("驾车路线获取失败: {} -> {}", fromName, toName);
-        }
-
-        if (allModes.isEmpty()) {
-            return "";
-        }
-
-        String recommendation = recommendMode(allModes, straightDistance);
-        StringBuilder matrix = new StringBuilder();
-        matrix.append(String.format("【%s → %s】(直线距离: %.1fkm)\n",
-                fromName, toName, straightDistance / 1000.0));
-        if (allModes.containsKey("walk")) {
-            Map<String, Object> w = allModes.get("walk");
-            matrix.append(String.format("  步行: %.1fkm, %d分钟\n", w.get("dist"), w.get("time")));
-        }
-        if (allModes.containsKey("transit")) {
-            Map<String, Object> t = allModes.get("transit");
-            String costStr = t.get("cost") != null ? String.format(", %.0f元", t.get("cost")) : "";
-            matrix.append(String.format("  公交/地铁: %.1fkm, %d分钟%s\n", t.get("dist"), t.get("time"), costStr));
-        }
-        if (allModes.containsKey("drive")) {
-            Map<String, Object> d = allModes.get("drive");
-            matrix.append(String.format("  驾车: %.1fkm, %d分钟\n", d.get("dist"), d.get("time")));
-        }
-        matrix.append(String.format("  ★ 推荐: %s\n\n", recommendation));
         return matrix.toString();
     }
 
     /**
-     * 智能推荐交通方式
+     * 仅从本地缓存/内置表取坐标（不发 API）：place 自带 lat/lng → 地理编码缓存 → 内置餐厅表。
+     * 返回 [lat, lng]，未命中返回 null。供直线距离矩阵与交通时间预估使用。
      */
-    private String recommendMode(Map<String, Map<String, Object>> allModes, double straightDistance) {
-        // 如果距离很近，推荐步行
-        if (straightDistance < 1000 && allModes.containsKey("walk")) {
-            int walkTime = (int) allModes.get("walk").get("time");
-            if (walkTime <= 15) {
-                return "步行（距离近，步行最方便）";
-            }
-        }
-
-        // 如果距离较近且步行时间可接受
-        if (straightDistance < 2000 && allModes.containsKey("walk")) {
-            int walkTime = (int) allModes.get("walk").get("time");
-            if (walkTime <= 20) {
-                return "步行（距离适中，步行可达）";
-            }
-        }
-
-        // 如果有公交且时间合理
-        if (allModes.containsKey("transit")) {
-            int transitTime = (int) allModes.get("transit").get("time");
-            if (allModes.containsKey("drive")) {
-                int driveTime = (int) allModes.get("drive").get("time");
-                // 公交时间不超过驾车的1.5倍，推荐公交
-                if (transitTime <= driveTime * 1.5) {
-                    return "公交/地铁（环保便捷）";
+    private double[] estimateCoord(String name, String city, List<Map<String, Object>> places) {
+        if (places != null) {
+            for (Map<String, Object> p : places) {
+                if (name.equals(String.valueOf(p.get("name")))) {
+                    if (p.get("lat") instanceof Number && p.get("lng") instanceof Number) {
+                        return new double[]{((Number) p.get("lat")).doubleValue(),
+                                ((Number) p.get("lng")).doubleValue()};
+                    }
+                    break;
                 }
-            } else {
-                return "公交/地铁（推荐）";
             }
         }
+        String key = (city == null ? "" : city) + "|" + name;
+        if (geoNameCache.containsKey(key)) {
+            return geoNameCache.get(key);
+        }
+        String bare = stripMealPrefix(name);
+        if (!bare.equals(name)) {
+            String bareKey = (city == null ? "" : city) + "|" + bare;
+            if (geoNameCache.containsKey(bareKey)) {
+                return geoNameCache.get(bareKey);
+            }
+        }
+        for (Map<String, Object> rest : CITY_RESTAURANTS.getOrDefault(city, List.of())) {
+            if (bare.equals(String.valueOf(rest.get("name")))
+                    && rest.get("lat") instanceof Number && rest.get("lng") instanceof Number) {
+                return new double[]{((Number) rest.get("lat")).doubleValue(),
+                        ((Number) rest.get("lng")).doubleValue()};
+            }
+        }
+        return null;
+    }
 
-        // 如果有驾车
-        if (allModes.containsKey("drive")) {
-            return "驾车（距离较远，驾车最省时）";
+    /**
+     * 真实路网修正前的近似交通时间（性能优化 1.24.0）。
+     * 瘦身 schema 后 LLM 不输出 travel 字段，correctStep 之前的
+     * fillPaceGaps/ensureComplete 等时间窗口步骤需要非零交通估算。
+     * 只从本地缓存取坐标（不发 API），未知节点按 15 分钟估；
+     * 已有大于 0 的值（本地回退路径/模型冗余输出）保留不动。
+     */
+    private void estimateTravelTimes(List<Map<String, Object>> activities, String city,
+                                     List<Map<String, Object>> places) {
+        if (activities == null || activities.size() < 2) {
+            return;
+        }
+        int prevIdx = -1;
+        int prevDay = Integer.MIN_VALUE;
+        for (int i = 0; i < activities.size(); i++) {
+            Map<String, Object> act = activities.get(i);
+            int day = act.get("day") instanceof Number n ? n.intValue() : 1;
+            if (i == 0 || day != prevDay) {
+                prevDay = day;
+                prevIdx = i;
+                continue;
+            }
+            Map<String, Object> prev = activities.get(prevIdx);
+            if (prev.get("travelTimeMin") instanceof Number n && n.intValue() > 0) {
+                prevDay = day;
+                prevIdx = i;
+                continue;
+            }
+            double[] from = estimateCoord(String.valueOf(prev.getOrDefault("name", "")), city, places);
+            double[] to = estimateCoord(String.valueOf(act.getOrDefault("name", "")), city, places);
+            if (from != null && to != null) {
+                double km = geoDistance(from[0], from[1], to[0], to[1]) / 1000.0;
+                int minutes = Math.max(10, Math.min(60, (int) Math.round(km * 3) + 8));
+                prev.put("travelTimeMin", minutes);
+                prev.put("travelDistanceKm", Math.round(km * 10) / 10.0);
+            } else {
+                prev.put("travelTimeMin", 15);
+            }
+            prevDay = day;
+            prevIdx = i;
+        }
+    }
+
+    /**
+     * 解析行程 LLM 响应为 JSON 树：先清理 markdown 包裹与前后杂讯，
+     * 失败再截取首个 { 至末个 } 重试；仍失败抛出异常，由调用方重试 LLM 或回退。
+     *
+     * @param response LLM 原始响应文本
+     * @param mapper 复用的 ObjectMapper
+     * @return 解析后的 JSON 树
+     * @throws Exception 两次解析均失败时
+     */
+    private JsonNode parseItineraryJson(String response, ObjectMapper mapper) throws Exception {
+        String cleaned = response.trim()
+                .replaceAll("```json\\s*", "").replaceAll("```\\s*", "")
+                .replaceAll("^[^{\\[]*", "").replaceAll("[^}\\]]*$", "")
+                .trim();
+        try {
+            return mapper.readTree(cleaned);
+        } catch (Exception e) {
+            int start = response.indexOf('{');
+            int end = response.lastIndexOf('}');
+            if (start >= 0 && end > start) {
+                return mapper.readTree(response.substring(start, end + 1));
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * 瘦身输出水合（性能优化 1.24.0）：LLM 只输出 day/name/startTime/durationMin，
+     * type/priority/travel 等字段从解析地点与餐饮配置补齐；
+     * 若模型仍返回全字段（未按瘦身 schema 输出），优先采用模型值以兼容旧行为。
+     *
+     * @param forcedDay 非空时强制覆盖 day（补全路径逐天调用，防止 LLM 标错天）
+     */
+    private Map<String, Object> hydrateActivity(JsonNode act, List<Map<String, Object>> places,
+                                                List<Map<String, Object>> meals, Integer forcedDay) {
+        Map<String, Object> a = new HashMap<>();
+        String name = act.has("name") ? act.get("name").asText() : "";
+        boolean mealName = name.contains("午餐") || name.contains("晚餐") || name.contains("早餐");
+        a.put("day", forcedDay != null ? forcedDay : (act.has("day") ? act.get("day").asInt() : 1));
+        a.put("name", name);
+        a.put("startTime", act.has("startTime") ? act.get("startTime").asText() : "");
+        if (act.has("type")) {
+            a.put("type", act.get("type").asText());
+        } else {
+            a.put("type", mealName ? "meal" : "visit");
         }
 
-        // 默认返回可用的方式
-        if (allModes.containsKey("transit")) {
-            return "公交/地铁";
+        Map<String, Object> place = null;
+        for (Map<String, Object> p : places) {
+            if (name.equals(String.valueOf(p.get("name")))) {
+                place = p;
+                break;
+            }
         }
-        if (allModes.containsKey("walk")) {
-            return "步行";
+        if (act.has("durationMin")) {
+            a.put("durationMin", act.get("durationMin").asInt());
+        } else if (mealName) {
+            String slot = name.contains("午餐") ? "lunch" : name.contains("晚餐") ? "dinner" : "breakfast";
+            int duration = 60;
+            for (Map<String, Object> m : meals) {
+                if (slot.equals(String.valueOf(m.get("type")))) {
+                    Object d = m.get("durationMin");
+                    duration = d instanceof Number ? ((Number) d).intValue() : 60;
+                    break;
+                }
+            }
+            a.put("durationMin", duration);
+        } else {
+            Object preferred = place == null ? null : place.get("preferredDurationMin");
+            a.put("durationMin", preferred instanceof Number ? ((Number) preferred).intValue() : 60);
         }
-        return "未知";
+
+        if (act.has("priority")) {
+            a.put("priority", act.get("priority").asText());
+        } else {
+            Object priority = place == null ? null : place.get("priority");
+            a.put("priority", priority instanceof String s && !s.isBlank() ? s : "recommended");
+        }
+        a.put("transportToNext", act.has("transportToNext") ? act.get("transportToNext").asText() : "");
+        a.put("travelTimeMin", act.has("travelTimeMin") ? act.get("travelTimeMin").asInt() : 0);
+        a.put("travelDistanceKm", act.has("travelDistanceKm") ? act.get("travelDistanceKm").asDouble() : 0.0);
+
+        if (act.has("endTime")) {
+            a.put("endTime", act.get("endTime").asText());
+        } else {
+            // endTime = startTime + durationMin：时间窗口类步骤依赖 endTime 推算游毕时刻，
+            // 缺失时退化为 start+duration（与 LLM 原输出行为一致），最终由 fixTimeOverlaps 校正
+            int startMinute = toMinuteOfDay(a.get("startTime"));
+            a.put("endTime", startMinute < 0 ? "" : toHhMm(startMinute + ((Number) a.get("durationMin")).intValue()));
+        }
+        if (act.has("notes")) {
+            a.put("notes", act.get("notes").asText());
+        }
+        return a;
     }
 
     /**
@@ -4979,24 +5002,22 @@ public class TripPlanningAgent {
                 %s
                 每餐 name 必须含「午餐」「晚餐」；有指定餐厅用「午餐·餐厅名」，有口味偏好用「午餐·菜系」。
                 
-                === 景点间真实路线（高德API数据，必须原样使用） ===
+                === 景点间直线距离（仅用于就近排序参考） ===
                 %s
-                travelTimeMin / travelDistanceKm / transportToNext 必须等于上方【★推荐】方式对应的数值，禁止自行估算：推荐"步行"→walk，"公交/地铁"→transit，"驾车"→drive。
-                同一天内相邻两个活动之间的 travelTimeMin 必须是大于 0 的分钟数（餐饮段同样要有交通时间）；只有当天最后一个活动才允许 travelTimeMin=0。
+                真实交通时间由系统在生成后按高德路网自动计算并校正，不要输出 travelTimeMin/travelDistanceKm/transportToNext；相邻活动默认预留 10-40 分钟交通。
                 
                 === 规划要求 ===
-                1. 按时间顺序给出每个活动的 startTime/endTime（HH:mm），相邻活动之间必须有交通时间
+                1. 按时间顺序给出每个活动的 startTime（HH:mm），相邻活动之间默认预留 10-40 分钟交通
                 2. 用餐符合作息：早餐 7:30-9:00，午餐 11:30-13:00，晚餐 17:30-19:30 且 21:00 前结束
-                3. 游玩时长参考建议时长；优先安排 priority=must；顺序优先相邻距离近的以减少折返
+                3. durationMin 参考建议游玩时长并按当日节奏微调（游览时长硬约束见上方活动频率），无需输出 endTime/交通字段；顺序优先相邻距离近的以减少折返
                 4. 每个活动含 day 字段，取值 1..%d；同一景点、同一餐厅禁止重复出现（含跨天）
-                5. notes 只写 10 字以内的简短说明；景点不够时用真实地名补齐（博物馆/历史街区/商圈/夜市/公园/夜景），禁止生成「自由活动」「市区漫步」等活动名，name 必须是具体真实地点
+                5. 景点不够时用真实地名补齐（博物馆/历史街区/商圈/夜市/公园/夜景），禁止生成「自由活动」「市区漫步」等活动名，name 必须是具体真实地点
                 
-                === 输出格式（严格JSON） ===
-                {"activities":[{"day":1,"name":"景点名","type":"visit","startTime":"08:00","endTime":"10:00","durationMin":120,"transportToNext":"walk","travelTimeMin":15,"travelDistanceKm":1.2,"priority":"must","notes":"简要说明"}]}
+                === 输出格式（严格JSON，只输出 day/name/startTime/durationMin 四个字段，其他字段一律不要输出） ===
+                {"activities":[{"day":1,"name":"景点名","startTime":"08:00","durationMin":120}]}
                 
-                === 示例：travelTimeMin/travelDistanceKm 严格匹配推荐 ===
-                路线：【天安门 → 故宫】步行 1.1km/15分钟（★推荐）；【故宫 → 王府井】公交 3.2km/25分钟（★推荐）
-                {"activities":[{"day":1,"name":"天安门广场","type":"visit","startTime":"08:00","endTime":"08:40","durationMin":40,"transportToNext":"walk","travelTimeMin":15,"travelDistanceKm":1.1,"priority":"must","notes":"参观天安门"},{"day":1,"name":"午餐·全聚德","type":"meal","startTime":"12:00","endTime":"13:00","durationMin":60,"transportToNext":"walk","travelTimeMin":12,"travelDistanceKm":0.9,"priority":"must","notes":"北京烤鸭"},{"day":1,"name":"王府井大街","type":"visit","startTime":"13:15","endTime":"15:15","durationMin":120,"transportToNext":"walk","travelTimeMin":8,"travelDistanceKm":0.6,"priority":"recommended","notes":"逛街"}]}
+                === 示例 ===
+                {"activities":[{"day":1,"name":"天安门广场","startTime":"08:00","durationMin":90},{"day":1,"name":"午餐·全聚德","startTime":"12:00","durationMin":60},{"day":1,"name":"王府井大街","startTime":"13:15","durationMin":120}]}
                 """, rawInput, timeStart, timeEnd, totalDays, totalDays,
                 pace.getMinDailyActivities(), pace.getMinVisits(), pace.getMaxVisits(),
                 Math.max(pace.getMinDailyActivities(), totalDays * pace.getMinDailyActivities()),

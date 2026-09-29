@@ -11,6 +11,37 @@ TripForge 的所有 Bug 修复都会记录在此文件中。
 
 ---
 
+## [1.24.0] - 2026-09-29
+
+### 修复
+
+- **晚餐·青岛老城海鲜馆 被入库去重误杀（repro-meal 青岛1日 dinner=N）**
+  - **现象**：plan-service 输出 6 活动含正餐，trip-service 落库日志 `入库去重剔除: day=1, type=meal, name=晚餐·青岛老城海鲜馆`、`入库二次去重: 6 -> 5`，最终行程缺晚餐
+  - **根因**：`dedupeActivitiesForPersist` 餐食分支对 `seenVisit` 用 `nameContains`（归一化后互含即重复，min≥3 即触发），餐厅名「青岛老城海鲜馆」天然包含景点名「青岛老城」→ 被判与景点重复剔除；文档口径为「餐食名与景点名**等价**视为重复」，包含判定过宽
+  - **修复**：meal-vs-visit 双向跨类型判定改为归一化后**精确相等**（`key.equals(normalizeActivityName(prev))`），同名/等价去重、同餐次唯一、meal-vs-meal 与 visit-vs-visit 的包含判定均保持原口径
+  - 文件：`trip-service/src/main/java/com/tripplanner/trip/service/TripService.java`
+
+- **e2e-pace moderate day1 visits 2 < 3（21:00 裁剪后数量下限失守）**
+  - **现象**：`活动频率预算 day1: 游览 510 分钟 / 3 个景点` 达标后，`时间顺延裁剪超出 21:00 的活动: 1 个` 把 day1 裁到 360 分钟 / 2 个景点，`refillStep` 未补，最终 band 断言 FAIL
+  - **根因**：`belowPaceFloor`（refillStep 闸门）只比较 `visitMinutes < minHours*60`，时长已达下限即返回 false，不检查景点数；而 `fillDayGaps` 本身支持按 `visitCount < minVisits` 在 21:00 窗口内插入——闸门挡住了它
+  - **修复**：`belowPaceFloor` 补入 `visitCount(dayActs) < pace.getMinVisits()`；补入活动受 fillDayGaps 原有约束（窗口 lead/trail、dur≤120、guard 轮次、候选耗尽即停），后续 `applyPaceBudget` 到数量下限即停裁不会反噬
+  - 文件：`plan-service/src/main/java/com/tripplanner/plan/agent/TripPlanningAgent.java`
+
+- **行程 LLM 偶发不合法 JSON 直落 inline 回退**
+  - **现象**：`LLM生成详细行程失败，使用本地回退: Unexpected character (':')... was expecting comma`（缺逗号/引号的输出毛刺），回退路径不走 postPipeline，正餐保底/水合/补时均缺失
+  - **修复**：抽出 `parseItineraryJson`（清理 markdown → 截取 `{...}` 两级解析），`planDetailedItinerary` 解析失败重调 LLM 一次（attempt=2），仍失败才回退；验证中实测触发并成功恢复
+  - 文件：`TripPlanningAgent.java`
+
+### 验证方式与结果（2026-09-29）
+
+| 项 | 结果 |
+|---|---|
+| `repro-meal.js` 青岛1日 | lunch=Y dinner=Y ✓（青岛老城海鲜馆保留，无入库去重剔除日志）✓ |
+| `repro-meal.js` 苏州3日 | d1/d2/d3 全部 lunch=Y dinner=Y ✓ |
+| `e2e-pace.js` | PASS，moderate day1 恢复 3 景点 ✓ |
+| plan-service / trip-service 单测 | 48/48、19/19 PASS ✓ |
+| JSON 重试实战 | 日志 `JSON解析失败(第1次)` → `attempt=2` 成功（18.6s），未落回退 ✓ |
+
 ## [1.23.0] - 2026-09-29
 
 ### 修复
