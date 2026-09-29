@@ -31,7 +31,7 @@ public final class RestSchedulePolicy {
         }
     }
 
-    /** 一次休息插入：在 afterIndex 活动之后插入，startMin 为含已接受偏移后的钟点 */
+    /** 一次休息插入：在 afterIndex 活动之后插入，startMin 为前一活动钟点（不含已接受偏移，标签另按偏移预估） */
     public record Insertion(int afterIndex, int durationMin, String label, int startMin) {}
 
     /** 一天的调度结果 */
@@ -89,11 +89,14 @@ public final class RestSchedulePolicy {
                 cursor = 0;
                 continue;
             }
-            int start = item.endMin() + shift;
+            // startMin 不含已接受偏移（= 前一活动当前钟点）：与后续活动的现有钟点对齐，
+            // 否则 fixTimeOverlaps 按 startTime 排序时会把休息错排到下一活动之后（travel 归零错位）
+            int start = item.endMin();
             if (lastEnd + shift + restMin > DAY_END_MIN) {
                 break;
             }
-            insertions.add(new Insertion(i, restMin, labelFor(start), start));
+            // 标签按含偏移的预估钟点取（近似休息最终落点）
+            insertions.add(new Insertion(i, restMin, labelFor(start + shift), start));
             shift += restMin;
             cursor = 0;
         }

@@ -77,11 +77,11 @@ const distanceText = computed(() => {
       title="点击导航此路段"
       @click="navigate"
     >
-      <div class="flex h-6 w-6 items-center justify-center rounded-full bg-white/80 dark:bg-surface-900/40" :class="modeConfig.color">
+      <span class="flex h-6 w-6 items-center justify-center rounded-full bg-white/80 dark:bg-surface-900/40" :class="modeConfig.color">
         <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="modeConfig.icon" />
         </svg>
-      </div>
+      </span>
       <span class="text-xs font-bold" :class="modeConfig.color">
         {{ modeLabel }}
       </span>

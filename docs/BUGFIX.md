@@ -11,6 +11,56 @@ TripForge 的所有 Bug 修复都会记录在此文件中。
 
 ---
 
+## [1.22.1] - 2026-09-29
+
+### 修复
+
+- **休息节点重排错位：同日第二次休息被排到下一活动之后（travel 归零不变式破坏）**
+  - 现象：`verify-rest.js` REST-5 连续两轮报「休息前一活动(清河坊步行街)travel=0 :: travel=11」；插入取证日志却显示「day=3 after=杭州博物馆(13:29) travel 0.5km/7min→0, 休息接管=7」——插入邻接与落库邻接不一致
+  - 原因：`RestSchedulePolicy.planDay` 计算 `start = item.endMin() + shift`，`shift` 为当日已接受休息累计时长（rest1=20min）。rest2 钟点含 +20 偏移（15:59）而清河坊仍持未偏移钟点（15:46）；`insertRestNodes` 输出后由 `fixTimeOverlaps` 按 startTime 字符串排序，shift(20) > 清河坊段 travel(7) → 清河坊排到 rest2 前，落库成「博物馆(travel=0) → 清河坊(travel=11) → rest2(接管7)」，REST-5 的「前一活动归零」断言必挂（仅同日 ≥2 次插入且 shift > travel 时触发）
+  - 修复：`startMin` 改为**不含已接受偏移**（= 前一活动当前钟点；step20 收口后恒 ≤ 下一活动现有钟点，排序邻接稳定），标签仍按 `endMin+shift` 预估最终钟点取名（时段命名不受影响）；`Insertion` javadoc 同步；`RestSchedulePolicyTest` 双插入用例期望 840→820
+  - 文件：`plan-service/src/main/java/com/tripplanner/plan/agent/RestSchedulePolicy.java`、`plan-service/src/test/java/com/tripplanner/plan/agent/RestSchedulePolicyTest.java`
+
+- **rest 活动被强生成泛化 slogan（「探索精彩旅程」）**
+  - 现象：API 查询 rest 活动 `slogan=探索精彩旅程`；休息节点设计上不写 notes/slogan，展示为无签名语更符合语义
+  - 原因：`TripVersionService.toResponse` 对缺失或泛化 slogan 的活动一律 `generateSlogan`，rest 类型落到默认 visit 分支
+  - 修复：`!"rest".equals(actType)` 前置豁免，rest 保持无 slogan（前端 `v-if="activity.slogan"` 已兼容空值）
+  - 文件：`trip-service/src/main/java/com/tripplanner/trip/service/TripVersionService.java`
+
+- **版本对比同名活动误报新增/移除**
+  - 现象：含多个「中场休息」的版本对比，除首个外的同名活动被第三轮差异合并判为 added/removed
+  - 原因：第一轮按 `normName(poiName)` 匹配用 `Map<String, Activity>`，同名仅首个入表
+  - 修复：改 `Map<String, Activity[]>` 队列配对——`findIndex` 优先同天、无同天取队首、`splice` 取出即消
+  - 文件：`frontend-new/src/components/version/VersionCompareView.vue`
+
+- **地图线路 hover 光标不恢复**
+  - 原因：`TripMap.addPolylines` `mouseout` 调 `map.setCursor('')`，空串非合法光标值
+  - 修复：改 `setCursor('default')`
+  - 文件：`frontend-new/src/components/map/TripMap.vue`
+
+- **导航按钮内嵌 div 违反 HTML 语义**
+  - 原因：1.22.0 将 pill 升级为 `<button>` 时图标容器仍为 `<div>`（button 仅允许 phrasing content），且开标签改 `<span>` 后闭合标签残留 `</div>`
+  - 修复：容器统一 `<span>` 并修正闭合
+  - 文件：`frontend-new/src/components/timeline/TransitConnector.vue`
+
+- **E2E 测试资产口径**
+  - `verify-variant.js` 景点名提取不排除 `rest` →「午后小憩」等结构性名称既在基准版又在新版且不在 rawInput，误报「排除生效：旧景点再现」；提取过滤补 `t !== 'rest'`（rest 非 POI，亦使 Jaccard/新增等换版断言更贴合景点语义）
+  - `verify-rest.js` 此前仅存临时目录，已固化到项目根 `D:\agent-trip-planner\verify-rest.js`
+  - 文件：`opencode/verify-variant.js`（临时 E2E 脚本）、`verify-rest.js`（项目根）
+
+### 验证方式与结果（2026-09-29）
+
+| 项 | 结果 |
+|---|---|
+| `mvn -o test -pl plan-service -Dtest=RestSchedulePolicyTest` | 9/9 PASS ✅ |
+| `verify-rest.js` 连跑两轮（trip 22 活动/3 休息、20 活动/1 休息） | 28/28、18/18 PASS ✅ |
+| `verify-variant.js`（rest 排除后复跑） | 16/16 PASS ✅ |
+| `verify-d.js` 回归 | 22/22 PASS ✅ |
+| `npm run build` → `robocopy /MIR` → `mvn -o -q package -DskipTests` → `start-all.ps1` | BUILD OK、PACKAGE OK，8081-8086 TCP 探测 6/6 UP ✅ |
+| 导航按钮人工点击（ShareView/时间轴/地图） | **未人工验证** ⚠️ |
+
+---
+
 ## [1.18.0] - 2026-09-28
 
 ### 修复

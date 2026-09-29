@@ -301,7 +301,8 @@ public class TripVersionService {
                 Object existing = act.get("slogan");
                 String slogan = existing == null ? null : existing.toString();
                 // 缺失或为泛化文案（如「游览西湖」「雷峰塔」）时，按景点生成个性化签名替换
-                if (sloganService.isGeneric(slogan, poiName)) {
+                // rest 休息节点无个性化签名需求（poiName 为「中场休息」等标签，生成词库文案无意义）
+                if (!"rest".equals(actType) && sloganService.isGeneric(slogan, poiName)) {
                     String generated = sloganService.generateSlogan(poiName, actType, seed);
                     if (generated != null) {
                         act.put("slogan", generated);

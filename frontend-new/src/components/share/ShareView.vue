@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import dayjs from 'dayjs'
 import type { Trip, Activity } from '@/api/types'
 import { normalizeActivities, formatTimePoint, formatDurationText, TRANSPORT_LABELS, resolveVersionStats } from '@/utils/activity'
+import { openNavigation } from '@/utils/navigation'
 
 interface Props {
   trip: Trip
@@ -28,6 +29,26 @@ const stats = computed(() =>
 
 function formatTime(isoString?: string): string {
   return formatTimePoint(isoString) || '--:--'
+}
+
+/** 同天下一段交通可导航（v1.22.1 分享页与时间轴一致） */
+function canNavNext(index: number): boolean {
+  const list = activities.value
+  const cur = list[index]
+  const next = list[index + 1]
+  return !!cur && !!next && Number(cur.day || 1) === Number(next.day || 1)
+}
+
+function navNext(index: number) {
+  const list = activities.value
+  const cur = list[index]
+  const next = list[index + 1]
+  if (!cur || !next) return
+  openNavigation(
+    { lat: cur.lat, lng: cur.lng, name: cur.poiName },
+    { lat: next.lat, lng: next.lng, name: next.poiName },
+    cur.transportMode,
+  )
 }
 
 function getActivityTypeIcon(type: string): string {
@@ -176,8 +197,20 @@ function getActivityTypeLabel(type: string): string {
                   </svg>
                   {{ formatDurationText(activity.durationMin) }}
                 </span>
+                <button
+                  v-if="activity.travelDurationMin && canNavNext(index)"
+                  type="button"
+                  class="flex items-center gap-1 cursor-pointer rounded-full px-1.5 -mx-1.5 py-0.5 transition-colors hover:bg-brand-50 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
+                  title="点击导航此路段"
+                  @click="navNext(index)"
+                >
+                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                  </svg>
+                  {{ TRANSPORT_LABELS[activity.transportMode || 'transit'] || activity.transportMode }} · {{ formatDurationText(activity.travelDurationMin) }}
+                </button>
                 <span
-                  v-if="activity.travelDurationMin"
+                  v-else-if="activity.travelDurationMin"
                   class="flex items-center gap-1"
                 >
                   <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

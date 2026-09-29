@@ -109,7 +109,8 @@ class RestSchedulePolicyTest {
         assertThat(plan.insertions().get(0).startMin()).isEqualTo(700);
         assertThat(plan.insertions().get(0).label()).isEqualTo("中场休息");
         assertThat(plan.insertions().get(1).afterIndex()).isEqualTo(2);
-        assertThat(plan.insertions().get(1).startMin()).isEqualTo(840);
+        // startMin 不含已接受偏移（840-20）：与下一活动现有钟点对齐，防 fixTimeOverlaps 重排错位
+        assertThat(plan.insertions().get(1).startMin()).isEqualTo(820);
         assertThat(plan.insertions().get(1).label()).isEqualTo("午后小憩");
     }
 

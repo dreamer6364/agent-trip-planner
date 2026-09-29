@@ -87,14 +87,23 @@ const rows = computed<DiffRow[]>(() => {
   const out: DiffRow[] = []
   let uid = 0
 
-  // 第一轮：按 POI 名称匹配（同名保留/调整）
-  const lMap = new Map(leftActs.value.map((a) => [normName(a.poiName), a]))
+  // 第一轮：按 POI 名称匹配（同名保留/调整）——同名多条（如多个「中场休息」）按队列配对，优先取同天
+  const lMap = new Map<string, Activity[]>()
+  for (const a of leftActs.value) {
+    const k = normName(a.poiName)
+    const list = lMap.get(k) || []
+    list.push(a)
+    lMap.set(k, list)
+  }
   const matchedL = new Set<Activity>()
   const rightMatched = new Set<Activity>()
 
   for (const r of rightActs.value) {
-    const l = lMap.get(normName(r.poiName))
-    if (!l || matchedL.has(l)) continue
+    const q = lMap.get(normName(r.poiName))
+    if (!q || q.length === 0) continue
+    let idx = q.findIndex((x) => String(x.day || 1) === String(r.day || 1))
+    if (idx < 0) idx = 0
+    const l = q.splice(idx, 1)[0]
     matchedL.add(l)
     rightMatched.add(r)
     const changes: string[] = []

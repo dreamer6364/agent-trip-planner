@@ -11,6 +11,40 @@ TripForge 的所有重要变更都会记录在此文件中。
 
 ---
 
+## [1.22.1] - 2026-09-29
+
+### 功能增强
+
+- **分享页交通行点击导航**：`ShareView` 行程卡片的路程行（「驾车 · 23分钟」）升级为按钮，与时间轴 pill 一致调用 `utils/navigation.ts` 打开高德导航（同天下一段有坐标走坐标导航，否则 POI 名称降级）；无下一段/非同天保留静态展示
+  - 文件：`frontend-new/src/components/share/ShareView.vue`
+
+### 修复
+
+- **同日第二次休息被 `fixTimeOverlaps` 重排到下一活动之后（travel 归零不变式破坏）**：`RestSchedulePolicy.planDay` 的 `startMin` 含当日已接受休息偏移 `shift`，而后续活动钟点尚未偏移，按 startTime 重排时 shift(20) > 前一活动 travel(7) 即错位——`startMin` 改为**不含偏移**（= 前一活动当前钟点，恒 ≤ 下一活动现有钟点），标签仍按 `end+shift` 预估钟点取名；单测用例同步（840→820）
+  - 文件：`plan-service/.../agent/RestSchedulePolicy.java`、`RestSchedulePolicyTest.java`
+- **rest 被强生成泛化 slogan（「探索精彩旅程」）**：`TripVersionService.toResponse` 对缺 slogan 活动一律补生成，rest 落到默认分支；跳过 `activityType=rest`（休息节点无签名语需求）
+  - 文件：`trip-service/.../service/TripVersionService.java`
+- **版本对比同名活动误报新增/移除**：`VersionCompareView` 第一轮按名匹配用 `Map<name,act>`，多个同名「中场休息」仅首个入表，其余落第三轮被判 added/removed；改为 `Map<name, Activity[]>` 队列配对（同天优先、取出即消）
+  - 文件：`frontend-new/src/components/version/VersionCompareView.vue`
+- **地图线路 hover 光标不恢复**：`TripMap` polyline `mouseout` 的 `setCursor('')` 改 `'default'`
+  - 文件：`frontend-new/src/components/map/TripMap.vue`
+- **导航按钮内嵌 div 违反 HTML 语义**：`TransitConnector` button 图标容器 `div` → `span`（button 仅允许 phrasing content），修正未匹配 `</div>` 闭合
+  - 文件：`frontend-new/src/components/timeline/TransitConnector.vue`
+- **测试资产**：`verify-rest.js` 固化到项目根（此前仅临时目录）；`verify-variant.js` 景点名提取排除 `rest`——「午后小憩」等结构性名称非 POI，不再误报「排除生效」
+
+### 验证方式与结果（2026-09-29）
+
+| 项 | 结果 |
+|---|---|
+| `RestSchedulePolicyTest` | 9/9 PASS ✅ |
+| `verify-rest.js` 连跑两轮（3 休息 / 1 休息行程） | 28/28、18/18 PASS ✅ |
+| `verify-variant.js`（rest 排除后复跑） | 16/16 PASS ✅ |
+| `verify-d.js` 回归 | 22/22 PASS ✅ |
+| `npm run build` → `robocopy /MIR` → `mvn -o package -DskipTests` → 重启 | BUILD OK、PACKAGE OK，8081-8086 TCP 6/6 UP ✅ |
+| ShareView/pill/polyline 导航人工点击 | **未人工验证** ⚠️（window.open 无法无头验证） |
+
+---
+
 ## [1.22.0] - 2026-09-28
 
 ### 功能增强

@@ -727,7 +727,7 @@ function addPolylines() {
     })
     polyline.on('mouseout', () => {
       try {
-        map.setCursor('')
+        map.setCursor('default')
       } catch {
         /* 同上 */
       }
