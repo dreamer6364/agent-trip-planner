@@ -11,6 +11,43 @@ TripForge 的所有 Bug 修复都会记录在此文件中。
 
 ---
 
+## [1.26.2] - 2026-09-30
+
+### 修复（行程导出 JSON/PDF/ICS 三种格式均无法下载）
+
+- **现象**：行程详情页「导出」面板三种格式全部失败
+  - JSON/ICS：点击后无任何下载发生（浏览器控制台为 data: URL 顶层导航/弹窗被拦截）
+  - PDF：返回 403 —— 前端拿到的 `downloadUrl` 是 `/api/trips/{id}/export/pdf?...`，而该下载端点后端根本不存在（只有 `GET /{id}/export` 元数据接口）
+- **根因**：
+  1. 元数据接口把**文件内容**编码成 `data:application/base64` 塞进 `downloadUrl`，前端用 `window.open` 打开——Chrome 禁止顶层 `data:` 导航，且 `await` 接口响应后用户手势已失效，触发弹窗拦截
+  2. PDF 路径返回一个从未实现的下载端点地址
+  3. 附带缺陷：`formatIcsDateTime` 在 `HH:mm:ss` 后**多拼一个 `00`**（生成非法 `DTSTART`，日历无法导入）；真实数据 `scheduled_start` 是 `"08:00"` 纯时间（无日期）会被整段跳过 → ICS 空文件；`getBytes()` 用平台默认编码；`exportTrip` 中 `Map.of()` 遇 `preferences`/`conflicts` 为 null 直接 NPE；PDF 从未真实渲染（返回 0 字节占位）
+- **修复**：
+  - 新增真实文件下载端点 `GET /api/trips/{id}/export/file?format=&version=&includeMap=&includeStats=&language=&timezone=`（`@RequirePermission("trip:read")`），返回原始字节流 + RFC5987 `Content-Disposition`；元数据接口 `downloadUrl` 全部改指该端点
+  - 前端新增 `utils/download.ts`：带 token 的 axios 请求取二进制 → `URL.createObjectURL` + `<a download>` 触发保存（绕开弹窗拦截与 data: 限制），`data:` URL 走 fetch 兜底；`ExportPanel.vue` 的 `window.open` 替换为该下载
+  - ICS 重写时间合成：完整 ISO 时间直接解析；`"HH:mm"` 纯时间用 `trip.timeStart` 日期 + `day-1` 偏移合成；DTEND 缺失/不晚于 DTSTART 时取 start+2h；字段名兼容 snake/camel 双键；转义先处理反斜杠
+  - JSON/Template null 安全（LinkedHashMap + `mapOrEmpty`/`listOrEmpty`），全部 `getBytes(StandardCharsets.UTF_8)` 显式 UTF-8
+  - PDF 真实渲染：iText7（pom 已有 `itext7-core:7.2.5`）+ 系统中文字体候选链（微软雅黑/黑体/宋体/等线，Linux/Noto 备选），标题/元信息/按天分组活动/地址/可选统计；无可用字体时抛业务错误而非输出乱码
+- **设计要点**：PDF「包含地图」勾选暂未嵌入高德静态图（markers 语法未确认，按 fail-open 不做半成品），不影响导出本身；`exportTrip` 与 `renderFile` 共用 `resolve()` 保证权限/版本解析一致
+- 涉及文件：
+  - `trip-service/.../controller/TripExportController.java`（新增 `/export/file`）
+  - `trip-service/.../service/TripExportService.java`（重写）
+  - `trip-service/src/test/.../TripExportServiceTest.java`（新增 9 条单测）
+  - `frontend-new/src/utils/download.ts`（新增）
+  - `frontend-new/src/components/trip/ExportPanel.vue`
+
+### 验证方式与结果（2026-09-30）
+
+| 项 | 结果 |
+|---|---|
+| `mvn -o -q -pl trip-service -am test`（含新增 TripExportServiceTest） | 9/9 PASS ✓（全量 0 fail） |
+| `npm run build`（vue-tsc + vite） | 构建通过 ✓ |
+| API 端到端：登录后 `GET /export?format=json` → 带 Bearer 请求 `downloadUrl` | 200，UTF-8 中文保留、JSON 可解析、Content-Disposition 文件名正确 ✓ |
+| API 端到端：PDF | 200，`%PDF` 头，174 KB 真实内容 ✓ |
+| API 端到端：ICS | 200，21 个 VEVENT，`DTSTART` 全部为合法 `yyyyMMddTHHmmss`，day1/day3 日期合成正确（20261015/20261017），无旧版多拼 00 ✓ |
+| `node verify-rest.js` 回归 | pass=28 fail=0 ✓ |
+| 部署 | stop → build → robocopy → `mvn -o package -DskipTests` → 6/6 端口 UP ✓ |
+
 ## [1.26.0] - 2026-09-29
 
 ### 安全修复（公开仓库发布前脱敏）

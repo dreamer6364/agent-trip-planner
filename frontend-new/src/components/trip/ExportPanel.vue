@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { tripApi } from '@/api/trip'
 import { useToast } from '@/composables/useToast'
+import { downloadFile } from '@/utils/download'
 
 const props = defineProps<{
   tripId: string
@@ -32,12 +33,12 @@ async function handleExport() {
       includeStats: includeStats.value,
     })
 
-    if (result.downloadUrl) {
-      window.open(result.downloadUrl, '_blank')
-      toast.success(`已导出 ${selectedFormat.value.toUpperCase()} 文件`)
-    } else {
+    if (!result.downloadUrl) {
       toast.error('导出失败：未获取到下载链接')
+      return
     }
+    await downloadFile(result.downloadUrl, result.filename)
+    toast.success(`已导出 ${result.filename}`)
     emit('close')
   } catch (error: any) {
     toast.error(error?.message || '导出失败，请重试')
