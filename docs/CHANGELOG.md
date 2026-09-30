@@ -11,6 +11,31 @@ TripForge 的所有重要变更都会记录在此文件中。
 
 ---
 
+## [1.26.0] - 2026-09-29
+
+### 重构与仓库整理（公开发布准备）
+
+- **启动脚本合并收敛**
+  - 删除 7 个冗余脚本：`start.bat`、`stop.bat`、`start-auth-simple.bat`、`start-gw-simple.bat`、`start-plan-simple.bat`、`start-trip-simple.bat`（4 个 simple 脚本各自硬编码数据库密码，且与 `start-all.ps1` 职责重复）、`restart-all.ps1`（旧版全量重启会强杀所有 Java 进程，误伤无关项目，且未注入 Key/日志参数）
+  - 统一入口：命令行用 `start-all.ps1 -Action start|stop|restart|status|tail`，双击用 `run.bat`（转发参数到 start-all.ps1）
+  - 同步更新 `AGENTS.md` §8.3 前端部署链末段为 `.\start-all.ps1 -Action restart`
+- **测试脚本数据库凭据统一**：新增根目录 `db-env.js`，从 `.env`/环境变量读取连接参数（缺密码时显式报错退出）；`check-time.js`、`showtrip.js`、`e2e-pace.js`、`e2e-diversity.js` 4 个直连 MySQL 的脚本改为引用 `dbEnv.args()`，全仓库代码不再硬编码数据库密码
+- **运行期垃圾清理**：删除根目录与各服务目录散落的 76 个运行期文件（`trip-service-app.log`、各服务 `*.log`/`*.err.log`、`logs/` 旧轮转 `*.gz`、`e2e-*-report.txt` 等）；`logs/` 由启动脚本自动重建
+- **GitHub 公开仓库**：脱敏后推送至 `dreamer6364/agent-trip-planner`（公开），推送前完成代码/历史密钥扫描
+- 涉及文件：`AGENTS.md`、`docker-compose.yml`、`start-all.ps1`、`db-env.js`（新增）、`check-time.js`、`showtrip.js`、`e2e-pace.js`、`e2e-diversity.js`、5 个服务 `application.yml`（脱敏详见 `docs/BUGFIX.md` 1.26.0）、7 个删除的脚本
+
+### 验证方式与结果（2026-09-29）
+
+| 项 | 结果 |
+|---|---|
+| 全量后端单测 `mvn -o test` | 6 suites / 82 tests / 0 failures ✓ |
+| 脱敏后重启 `start-all.ps1 -Action start` | 187s，6/6 服务 UP（MYSQL_PASSWORD 由 .env 注入）✓ |
+| `node --check`（db-env.js + 4 脚本） | 语法全部通过 ✓ |
+| `node check-time.js`（db-env 实连数据库） | ALL_PASS ✓ |
+| `node verify-rest.js`（REST 全量回归） | pass=28 fail=0 ✓ |
+| 代码硬编码密码扫描（HEAD） | 本地开发数据库密码在代码中出现 0 处；LLM/高德 Key、.env、私钥文件 0 处 ✓ |
+| 历史提交密钥扫描（全部 8 commits） | API 密钥/私钥/.env 均 0 处 ✓ |
+
 ## [1.25.0] - 2026-09-29
 
 ### 功能增强

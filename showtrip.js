@@ -1,7 +1,8 @@
 const { execFileSync } = require('child_process');
+const dbEnv = require('./db-env');
 const tripId = process.argv[2];
 const sql = `select activities, routes from trip_planner.trip_versions where trip_id='${tripId}' order by created_at desc limit 1;`;
-const out = execFileSync('mysql', ['-h127.0.0.1', '-P3306', '-uroot', '-p12345678mxy', '--default-character-set=utf8mb4', '-N', '-B', '-e', sql], { encoding: 'utf8' });
+const out = execFileSync('mysql', [...dbEnv.args(), '--default-character-set=utf8mb4', '-N', '-B', '-e', sql], { encoding: 'utf8' });
 const line = out.split(/\r?\n/).find(l => l.trim().length > 0);
 if (!line) { console.log('no row'); process.exit(0); }
 const parts = line.split('\t');

@@ -1,6 +1,7 @@
 /* E2E: 活动频率三档验证 —— 紧凑/适中/宽松 各建一次 2 日行程，校验每日游览时长与景点数 */
 const BASE = 'http://localhost:8086';
 const { execFileSync } = require('child_process');
+const dbEnv = require('./db-env');
 
 const CASES = [
   { pace: 'compact', expect: { minHours: 8, maxHours: 10, minVisits: 4, maxVisits: 6 } },
@@ -28,13 +29,13 @@ function fmt(m) {
 }
 function loadActs(tripId) {
   const sql = `select activities from trip_planner.trip_versions where trip_id='${tripId}' order by created_at desc limit 1;`;
-  const out = execFileSync('mysql', ['-h127.0.0.1', '-P3306', '-uroot', '-p12345678mxy',
+  const out = execFileSync('mysql', [...dbEnv.args(),
     '--default-character-set=utf8mb4', '-N', '-B', '-e', sql], { encoding: 'utf8' }).trim();
   return JSON.parse(out);
 }
 function loadPace(tripId) {
   const sql = `select pace from trip_planner.trips where id='${tripId}';`;
-  return execFileSync('mysql', ['-h127.0.0.1', '-P3306', '-uroot', '-p12345678mxy',
+  return execFileSync('mysql', [...dbEnv.args(),
     '--default-character-set=utf8mb4', '-N', '-B', '-e', sql], { encoding: 'utf8' }).trim();
 }
 

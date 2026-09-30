@@ -1,6 +1,7 @@
 /* E2E: 大理4日 — 多元化 + 真实路程时间约束校验（读 DB 最新版本） */
 const BASE = 'http://localhost:8086';
 const { execFileSync } = require('child_process');
+const dbEnv = require('./db-env');
 
 async function req(path, opts = {}) {
   const res = await fetch(BASE + path, {
@@ -22,7 +23,7 @@ function fmt(m) {
 }
 function loadActs(tripId) {
   const sql = `select activities from trip_planner.trip_versions where trip_id='${tripId}' order by created_at desc limit 1;`;
-  const out = execFileSync('mysql', ['-h127.0.0.1', '-P3306', '-uroot', '-p12345678mxy',
+  const out = execFileSync('mysql', [...dbEnv.args(),
     '--default-character-set=utf8mb4', '-N', '-B', '-e', sql], { encoding: 'utf8' }).trim();
   return JSON.parse(out);
 }

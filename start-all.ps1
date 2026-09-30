@@ -64,7 +64,7 @@ $AmapKey = $null
 $LlmKey  = $null
 # Load secrets from .env (not committed, see .gitignore) - whitelisted keys only
 $envFile = Join-Path $Root '.env'
-$allowedEnvKeys = @('AMAP_API_KEY', 'ZHIPU_API_KEY')
+$allowedEnvKeys = @('AMAP_API_KEY', 'ZHIPU_API_KEY', 'MYSQL_PASSWORD')
 if (Test-Path $envFile) {
     foreach ($line in Get-Content $envFile) {
         if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$' -and $allowedEnvKeys -contains $Matches[1]) {
@@ -76,6 +76,9 @@ if (Test-Path $envFile) {
 }
 if (-not $AmapKey -or -not $LlmKey) {
     Write-Warning '.env is missing AMAP_API_KEY / ZHIPU_API_KEY - map and LLM features may fail'
+}
+if (-not $env:MYSQL_PASSWORD) {
+    Write-Warning '.env is missing MYSQL_PASSWORD - services will fail to connect to MySQL (application.yml has no password default)'
 }
 # 智谱 LLM Key（plan-service 规划调用）
 $LlmKey  = $LlmKey

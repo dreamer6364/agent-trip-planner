@@ -409,7 +409,7 @@ public class TripController {
 2. 条目须包含：改动点、涉及文件、原因/设计要点、**验证方式与结果**（可附验证表格）
 3. 版本号三段十进制，基线 1.11.0，只增不改历史条目
 4. 涉及前端功能改动时，必须同步执行并在验证结果中登记：
-   `npm run build` → `robocopy frontend-new\dist gateway\src\main\resources\static /MIR` → `mvn -o package -DskipTests` → `restart-all.ps1`
+   `npm run build` → `robocopy frontend-new\dist gateway\src\main\resources\static /MIR` → `mvn -o package -DskipTests` → `.\start-all.ps1 -Action restart`
 5. 完成变更后自查：`docs/CHANGELOG.md` / `docs/BUGFIX.md` 顶部是否已有本次版本号条目
 
 ---

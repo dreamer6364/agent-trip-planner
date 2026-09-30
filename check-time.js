@@ -1,6 +1,7 @@
 const { execFileSync } = require('child_process');
+const dbEnv = require('./db-env');
 const sql = `select tp.id, tv.activities from trip_planner.trips tp join trip_planner.trip_versions tv on tv.trip_id=tp.id where tv.created_at > now() - interval 2 hour order by tv.created_at desc;`;
-const out = execFileSync('mysql', ['-h127.0.0.1', '-P3306', '-uroot', '-p12345678mxy', '--default-character-set=utf8mb4', '-N', '-B', '-e', sql], { encoding: 'utf8' });
+const out = execFileSync('mysql', [...dbEnv.args(), '--default-character-set=utf8mb4', '-N', '-B', '-e', sql], { encoding: 'utf8' });
 
 function toMin(t) {
   const m = /^(\d{1,2}):(\d{2})/.exec(String(t || '').trim());

@@ -11,6 +11,31 @@ TripForge 的所有 Bug 修复都会记录在此文件中。
 
 ---
 
+## [1.26.0] - 2026-09-29
+
+### 安全修复（公开仓库发布前脱敏）
+
+- **问题**：仓库将以公开形式推送到 GitHub，但多处代码硬编码/回退了本地开发数据库密码，克隆即泄露
+- **修复**（HEAD 起代码中该密码出现 0 处）：
+  - 5 个服务 `application.yml`（auth/trip/plan/planning-worker/notification）：`password` 移除硬编码回退值，改为 `${MYSQL_PASSWORD:}`
+  - `docker-compose.yml`：`MYSQL_ROOT_PASSWORD`/`MYSQL_PASSWORD` 默认值移除，改为 `${VAR:?...}` 强制从 `.env` 读取（compose 自动加载项目根 `.env`，模板 `.env.example` 已含占位值）
+  - `start-all.ps1`：`.env` 读取白名单新增 `MYSQL_PASSWORD` 并注入子进程；缺失时启动阶段明确告警
+  - 4 个 JS 脚本（`check-time.js`/`showtrip.js`/`e2e-pace.js`/`e2e-diversity.js`）硬编码 `-p…` → 统一经新增 `db-env.js` 从 `.env` 读取
+  - 删除 4 个硬编码密码的 `start-*-simple.bat`（合并入 `start-all.ps1`，见 CHANGELOG 1.26.0）
+- **设计要点**：按 AGENTS §10.1 环境变量注入规范，配置文件不留敏感回退值；`.env` 保持 gitignore 不入库
+- **影响**：不经 `start-all.ps1` 裸启动（直接 `java -jar`/`mvn spring-boot:run`）时需自行提供 `MYSQL_PASSWORD` 环境变量，否则数据源连接失败
+- **残留说明**：`docs/BUGFIX.md` 历史条目（1.23.0）与既有 8 个历史提交中仍保留该本地开发密码文本——按「只增不改历史条目」规则不做改写；该密码仅对应本机 localhost MySQL，真实密钥（LLM/高德/JWT/.env/私钥）经扫描在代码与全部历史中均为 0 处
+
+### 验证方式与结果（2026-09-29）
+
+| 项 | 结果 |
+|---|---|
+| 脱敏后全量单测 `mvn -o test` | 82/82 PASS ✓ |
+| 脱敏后冷启动 | `start-all.ps1 -Action start` 6/6 UP，业务链路可用 ✓ |
+| `node check-time.js`（新 db-env.js 读 .env 实连） | ALL_PASS ✓ |
+| `node verify-rest.js` | pass=28 fail=0 ✓ |
+| HEAD 代码密钥扫描 | 本地开发密码代码 0 处、API 密钥 0 处、密钥文件 0 处 ✓ |
+
 ## [1.24.0] - 2026-09-29
 
 ### 修复
