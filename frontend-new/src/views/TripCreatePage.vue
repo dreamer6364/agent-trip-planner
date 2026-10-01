@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useTripStore } from '@/stores/trip'
@@ -17,11 +17,11 @@ const isSubmitting = ref(false)
 const showPlanIntro = ref(false)
 const pendingForm = ref<CreateTripRequest | null>(null)
 
-const tips = [
-  '试着描述你喜欢的旅行风格',
-  '提到具体城市名效果更好',
-  '可以指定交通方式'
-]
+const tips = computed(() => [
+  t('tripCreate.tips.style'),
+  t('tripCreate.tips.city'),
+  t('tripCreate.tips.transport')
+])
 
 const handleBack = () => {
   router.back()
@@ -42,7 +42,7 @@ const handlePlanConfirm = async () => {
   isSubmitting.value = true
   try {
     const newTrip = await tripStore.createTrip(pendingForm.value)
-    toast.success('行程创建成功！AI 已生成完整行程')
+    toast.success(t('tripCreate.toasts.createSuccess'))
     showPlanIntro.value = false
     pendingForm.value = null
     router.push(`/trips/${newTrip.id}/planning`)
@@ -51,9 +51,9 @@ const handlePlanConfirm = async () => {
     showPlanIntro.value = false
     const msg = error instanceof Error ? error.message : ''
     if (msg.includes('timeout') || msg.includes('Timeout')) {
-      toast.error('AI 规划超时，请稍后在行程详情中重试')
+      toast.error(t('tripCreate.toasts.timeout'))
     } else {
-      toast.error(msg || '创建失败，请重试')
+      toast.error(msg || t('tripCreate.toasts.createFailed'))
     }
   } finally {
     isSubmitting.value = false

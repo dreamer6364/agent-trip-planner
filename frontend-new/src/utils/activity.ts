@@ -1,4 +1,5 @@
 import type { Activity, VersionStats } from '@/api/types'
+import i18n from '@/i18n'
 
 /**
  * 后端活动字段多为 snake_case，统一规范化为前端 camelCase
@@ -135,14 +136,20 @@ export function formatTimePoint(value?: string | null): string {
 
 export function formatDurationText(min?: number | null): string {
   const m = Math.max(0, Math.floor(Number(min ?? 0) || 0))
-  if (m <= 0) return '0分钟'
-  if (m < 60) return `${m}分钟`
+  if (m <= 0) return i18n.global.t('duration.zero')
+  if (m < 60) return i18n.global.t('duration.minutes', { m })
   const h = Math.floor(m / 60)
   const rest = m % 60
-  return rest > 0 ? `${h}小时${rest}分` : `${h}小时`
+  return rest > 0 ? i18n.global.t('duration.hoursMinutes', { h, m: rest }) : i18n.global.t('duration.hours', { h })
 }
 
-export const TRANSPORT_LABELS: Record<string, string> = {
+/**
+ * 交通方式标签：Proxy 包装原始中文字面量对象，
+ * 保持 Record<string,string> API（下标读取、Object.keys/展开 均可用），
+ * 读取时按当前语言返回 i18n.global.t('transport.' + key)，随 locale 切换即时生效；
+ * 未知 key 仍返回 undefined，调用方的 `|| mode` 兜底逻辑不受影响。
+ */
+const TRANSPORT_LABELS_SOURCE: Record<string, string> = {
   walk: '步行',
   transit: '公交/地铁',
   drive: '驾车',
@@ -151,6 +158,28 @@ export const TRANSPORT_LABELS: Record<string, string> = {
   taxi: '打车',
   mixed: '混合出行',
 }
+
+export const TRANSPORT_LABELS: Record<string, string> = new Proxy(TRANSPORT_LABELS_SOURCE, {
+  get(target, prop, receiver) {
+    if (typeof prop === 'string' && Object.prototype.hasOwnProperty.call(target, prop)) {
+      return i18n.global.t(`transport.${prop}`)
+    }
+    return Reflect.get(target, prop, receiver)
+  },
+  has(target, prop) {
+    return Reflect.has(target, prop)
+  },
+  ownKeys(target) {
+    return Reflect.ownKeys(target)
+  },
+  getOwnPropertyDescriptor(target, prop) {
+    const desc = Reflect.getOwnPropertyDescriptor(target, prop)
+    if (desc && typeof prop === 'string' && Object.prototype.hasOwnProperty.call(target, prop)) {
+      return { ...desc, value: i18n.global.t(`transport.${prop}`) }
+    }
+    return desc
+  },
+})
 
 /** 从活动列表现算统计（后端旧数据 stats 缺字段时兜底） */
 export function computeStatsFromActivities(list: Activity[]): Partial<VersionStats> {

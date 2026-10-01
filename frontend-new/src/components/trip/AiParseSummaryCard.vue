@@ -60,7 +60,7 @@ const hasContent = computed(
       class="mb-3 inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
     >
       <i class="ri-map-pin-2-fill" />
-      {{ t('parseSummary.cityLabel') }}：{{ city }}
+      {{ t('parseSummary.cityLabel') }}: {{ city }}
     </div>
     <div
       v-else

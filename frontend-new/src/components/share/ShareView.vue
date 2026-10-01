@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import dayjs from 'dayjs'
+import { useI18n } from 'vue-i18n'
 import type { Trip, Activity } from '@/api/types'
 import { normalizeActivities, formatTimePoint, formatDurationText, TRANSPORT_LABELS, resolveVersionStats } from '@/utils/activity'
 import { openNavigation } from '@/utils/navigation'
@@ -11,16 +12,20 @@ interface Props {
 
 const props = defineProps<Props>()
 
+const { t } = useI18n()
+
 const tripData = computed(() => props.trip)
 const activities = computed(() => normalizeActivities(props.trip.latestVersion?.activities || []))
 
 const formattedDateRange = computed(() => {
   const start = dayjs(props.trip.timeStart)
   const end = dayjs(props.trip.timeEnd)
+  const startFull = t('shareView.dateFull', { y: start.year(), m: start.month() + 1, d: start.date() })
   if (start.isSame(end, 'day')) {
-    return start.format('YYYY年M月D日')
+    return startFull
   }
-  return `${start.format('YYYY年M月D日')} - ${end.format('M月D日')}`
+  const endShort = t('shareView.dateShort', { m: end.month() + 1, d: end.date() })
+  return `${startFull} - ${endShort}`
 })
 
 const stats = computed(() =>
@@ -67,20 +72,21 @@ function getActivityTypeIcon(type: string): string {
   return iconMap[type] || '📍'
 }
 
+const activityTypeKeys: Record<string, string> = {
+  ATTRACTION: 'shareView.type.attraction',
+  RESTAURANT: 'shareView.type.restaurant',
+  HOTEL: 'activity.stay',
+  SHOPPING: 'activity.shopping',
+  ENTERTAINMENT: 'shareView.type.entertainment',
+  TRANSPORT: 'activity.transit',
+  WALKING: 'trip.walk',
+  MEAL: 'activity.meal',
+  BREAK: 'shareView.type.break',
+  rest: 'shareView.type.break',
+}
+
 function getActivityTypeLabel(type: string): string {
-  const labelMap: Record<string, string> = {
-    ATTRACTION: '景点',
-    RESTAURANT: '餐厅',
-    HOTEL: '住宿',
-    SHOPPING: '购物',
-    ENTERTAINMENT: '娱乐',
-    TRANSPORT: '交通',
-    WALKING: '步行',
-    MEAL: '用餐',
-    BREAK: '休息',
-    rest: '休息',
-  }
-  return labelMap[type] || '活动'
+  return t(activityTypeKeys[type] || 'shareView.type.activity')
 }
 </script>
 
@@ -99,12 +105,12 @@ function getActivityTypeLabel(type: string): string {
             <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064" />
             </svg>
-            公开分享
+            {{ t('share.public') }}
           </span>
         </div>
 
         <div class="rounded-xl bg-surface-50 p-4 mb-6">
-          <p class="text-xs font-medium text-surface-500 mb-1">行程描述</p>
+          <p class="text-xs font-medium text-surface-500 mb-1">{{ t('shareView.description') }}</p>
           <p class="text-sm text-surface-700 leading-relaxed">{{ tripData.rawInput }}</p>
         </div>
 
@@ -113,25 +119,25 @@ function getActivityTypeLabel(type: string): string {
             <p class="text-lg font-bold text-brand-600">
               {{ stats.placeCount ? Object.values(stats.placeCount).reduce((a, b) => a + b, 0) : 0 }}
             </p>
-            <p class="text-xs text-surface-500">景点数</p>
+            <p class="text-xs text-surface-500">{{ t('shareView.spotCount') }}</p>
           </div>
           <div class="rounded-xl bg-accent-50 p-3 text-center">
             <p class="text-lg font-bold text-accent-600">
               {{ stats.totalDurationMin ? Math.round(stats.totalDurationMin / 60 * 10) / 10 : 0 }}h
             </p>
-            <p class="text-xs text-surface-500">总时长</p>
+            <p class="text-xs text-surface-500">{{ t('shareView.totalDuration') }}</p>
           </div>
           <div class="rounded-xl bg-success-50 p-3 text-center">
             <p class="text-lg font-bold text-success-600">
               {{ stats.visitDurationMin ? Math.round(stats.visitDurationMin / 60 * 10) / 10 : 0 }}h
             </p>
-            <p class="text-xs text-surface-500">游玩时长</p>
+            <p class="text-xs text-surface-500">{{ t('shareView.visitDuration') }}</p>
           </div>
           <div class="rounded-xl bg-warning-50 p-3 text-center">
             <p class="text-lg font-bold text-warning-600">
               {{ stats.transitDurationMin ? Math.round(stats.transitDurationMin / 60 * 10) / 10 : 0 }}h
             </p>
-            <p class="text-xs text-surface-500">交通时长</p>
+            <p class="text-xs text-surface-500">{{ t('shareView.transitDuration') }}</p>
           </div>
         </div>
       </div>
@@ -141,14 +147,14 @@ function getActivityTypeLabel(type: string): string {
           <svg class="h-5 w-5 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
-          行程时间线
+          {{ t('shareView.timeline') }}
         </h2>
 
         <div v-if="activities.length === 0" class="text-center py-12">
           <svg class="h-12 w-12 text-surface-300 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
             <path stroke-linecap="round" stroke-linejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
           </svg>
-          <p class="text-surface-500">暂无行程数据</p>
+          <p class="text-surface-500">{{ t('shareView.empty') }}</p>
         </div>
 
         <div v-else class="relative">
@@ -180,7 +186,7 @@ function getActivityTypeLabel(type: string): string {
                     activity.priority === 'LOW' && 'bg-success-100 text-success-700',
                   ]"
                 >
-                  {{ activity.priority === 'HIGH' ? '必去' : activity.priority === 'MEDIUM' ? '推荐' : '可选' }}
+                  {{ activity.priority === 'HIGH' ? t('shareView.priority.must') : activity.priority === 'MEDIUM' ? t('shareView.priority.recommended') : t('shareView.priority.optional') }}
                 </span>
               </div>
 
@@ -201,7 +207,7 @@ function getActivityTypeLabel(type: string): string {
                   v-if="activity.travelDurationMin && canNavNext(index)"
                   type="button"
                   class="flex items-center gap-1 cursor-pointer rounded-full px-1.5 -mx-1.5 py-0.5 transition-colors hover:bg-brand-50 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
-                  title="点击导航此路段"
+                  :title="t('shareView.navTitle')"
                   @click="navNext(index)"
                 >
                   <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

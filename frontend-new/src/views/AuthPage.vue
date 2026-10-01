@@ -82,15 +82,15 @@ function validateLoginForm(): boolean {
   let valid = true
 
   if (!loginForm.email.trim()) {
-    loginErrors.email = t('auth.email') + '不能为空'
+    loginErrors.email = t('auth.required', { field: t('auth.email') })
     valid = false
   } else if (!validateEmail(loginForm.email)) {
-    loginErrors.email = '请输入有效的邮箱地址'
+    loginErrors.email = t('auth.invalidEmail')
     valid = false
   }
 
   if (!loginForm.password) {
-    loginErrors.password = t('auth.password') + '不能为空'
+    loginErrors.password = t('auth.required', { field: t('auth.password') })
     valid = false
   }
 
@@ -102,23 +102,23 @@ function validateRegisterForm(): boolean {
   let valid = true
 
   if (!registerForm.name.trim()) {
-    registerErrors.name = t('auth.name') + '不能为空'
+    registerErrors.name = t('auth.required', { field: t('auth.name') })
     valid = false
   } else if (registerForm.name.length < 2) {
-    registerErrors.name = '用户名至少2个字符'
+    registerErrors.name = t('auth.nameTooShort')
     valid = false
   }
 
   if (!registerForm.email.trim()) {
-    registerErrors.email = t('auth.email') + '不能为空'
+    registerErrors.email = t('auth.required', { field: t('auth.email') })
     valid = false
   } else if (!validateEmail(registerForm.email)) {
-    registerErrors.email = '请输入有效的邮箱地址'
+    registerErrors.email = t('auth.invalidEmail')
     valid = false
   }
 
   if (!registerForm.password) {
-    registerErrors.password = t('auth.password') + '不能为空'
+    registerErrors.password = t('auth.required', { field: t('auth.password') })
     valid = false
   } else if (!PASSWORD_PATTERN.test(registerForm.password)) {
     registerErrors.password = t('auth.passwordHint')
@@ -126,10 +126,10 @@ function validateRegisterForm(): boolean {
   }
 
   if (!registerForm.confirmPassword) {
-    registerErrors.confirmPassword = '请确认密码'
+    registerErrors.confirmPassword = t('auth.pleaseConfirmPassword')
     valid = false
   } else if (registerForm.password !== registerForm.confirmPassword) {
-    registerErrors.confirmPassword = '两次密码输入不一致'
+    registerErrors.confirmPassword = t('auth.passwordMismatch')
     valid = false
   }
 
@@ -153,7 +153,7 @@ function applyFieldDetails(details: Record<string, string> | undefined, scope: '
 /** 登录/注册失败统一处理：字段级错误 + 表单横幅 + Toast */
 function handleAuthError(err: unknown, scope: 'login' | 'register') {
   const apiErr = err instanceof ApiError ? err : null
-  const fallback = scope === 'login' ? '登录失败，请重试' : '注册失败，请重试'
+  const fallback = scope === 'login' ? t('auth.loginFailed') : t('auth.registerFailed')
   const message = apiErr?.message || (err instanceof Error && err.message ? err.message : fallback)
 
   applyFieldDetails(apiErr?.details, scope)
@@ -202,11 +202,11 @@ async function handleRegister() {
 }
 
 function handleGoogleLogin() {
-  toast.info('Google 登录功能即将上线')
+  toast.info(t('auth.oauthComingSoon', { provider: 'Google' }))
 }
 
 function handleGithubLogin() {
-  toast.info('GitHub 登录功能即将上线')
+  toast.info(t('auth.oauthComingSoon', { provider: 'GitHub' }))
 }
 </script>
 
@@ -375,7 +375,7 @@ function handleGithubLogin() {
             <div class="w-full border-t border-surface-200 dark:border-surface-700" />
           </div>
           <div class="relative flex justify-center text-sm">
-            <span class="bg-white dark:bg-surface-900 px-3 text-surface-400">或使用以下方式登录</span>
+            <span class="bg-white dark:bg-surface-900 px-3 text-surface-400">{{ t('auth.orContinueWith') }}</span>
           </div>
         </div>
 
@@ -588,7 +588,7 @@ function handleGithubLogin() {
             <div class="w-full border-t border-surface-200 dark:border-surface-700" />
           </div>
           <div class="relative flex justify-center text-sm">
-            <span class="bg-white dark:bg-surface-900 px-3 text-surface-400">或使用以下方式登录</span>
+            <span class="bg-white dark:bg-surface-900 px-3 text-surface-400">{{ t('auth.orContinueWith') }}</span>
           </div>
         </div>
 

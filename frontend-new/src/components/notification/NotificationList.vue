@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { onMounted, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useNotificationStore } from '@/stores/notification'
 import NotificationItem from './NotificationItem.vue'
 
+const { t } = useI18n()
 const store = useNotificationStore()
 
 const notifications = computed(() => store.notifications)
@@ -26,7 +28,7 @@ function handleRead(id: string) {
     <div class="card-base overflow-hidden">
       <div class="flex items-center justify-between px-5 py-4 border-b border-surface-100">
         <div class="flex items-center gap-3">
-          <h2 class="text-lg font-semibold text-surface-900">通知</h2>
+          <h2 class="text-lg font-semibold text-surface-900">{{ t('notification.title') }}</h2>
           <span
             v-if="store.unreadCount > 0"
             class="inline-flex items-center justify-center h-5 min-w-[20px] rounded-full bg-brand-500 px-1.5 text-xs font-bold text-white"
@@ -39,7 +41,7 @@ function handleRead(id: string) {
           class="text-sm font-medium text-brand-600 hover:text-brand-700 transition-colors"
           @click="handleMarkAllRead"
         >
-          全部已读
+          {{ t('notification.markAllRead') }}
         </button>
       </div>
 
@@ -64,8 +66,8 @@ function handleRead(id: string) {
             <path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
           </svg>
         </div>
-        <p class="text-surface-500 font-medium">暂无通知</p>
-        <p class="text-sm text-surface-400 mt-1">新消息将会在这里显示</p>
+        <p class="text-surface-500 font-medium">{{ t('notification.empty') }}</p>
+        <p class="text-sm text-surface-400 mt-1">{{ t('notification.emptyHint') }}</p>
       </div>
 
       <div v-else class="divide-y divide-surface-100">

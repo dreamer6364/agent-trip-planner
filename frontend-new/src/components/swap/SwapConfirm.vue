@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import UIModal from '@/components/ui/UIModal.vue'
 
 interface Props {
@@ -9,6 +10,8 @@ interface Props {
 }
 
 defineProps<Props>()
+
+const { t } = useI18n()
 
 const emit = defineEmits<{
   confirm: [autoAdjust: boolean]
@@ -34,7 +37,7 @@ function handleClose() {
         <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-warning-100">
           <i class="ri-question-line text-lg text-warning-600" />
         </div>
-        <h3 class="text-base font-semibold text-surface-900">确认替换</h3>
+        <h3 class="text-base font-semibold text-surface-900">{{ t('swap.confirm') }}</h3>
       </div>
     </template>
 
@@ -42,7 +45,7 @@ function handleClose() {
       <!-- Swap Visualization -->
       <div class="flex items-center gap-3 rounded-xl bg-surface-50 p-4">
         <div class="min-w-0 flex-1">
-          <p class="mb-1 text-[10px] font-medium uppercase tracking-wider text-surface-400">当前</p>
+          <p class="mb-1 text-[10px] font-medium uppercase tracking-wider text-surface-400">{{ t('swapConfirm.current') }}</p>
           <p class="truncate text-sm font-semibold text-surface-700 line-through decoration-surface-300">
             {{ oldName }}
           </p>
@@ -51,7 +54,7 @@ function handleClose() {
           <i class="ri-arrow-right-s-line text-brand-600" />
         </div>
         <div class="min-w-0 flex-1">
-          <p class="mb-1 text-[10px] font-medium uppercase tracking-wider text-surface-400">替换为</p>
+          <p class="mb-1 text-[10px] font-medium uppercase tracking-wider text-surface-400">{{ t('swapConfirm.replacedWith') }}</p>
           <p class="truncate text-sm font-bold text-brand-700">{{ newName }}</p>
         </div>
       </div>
@@ -64,9 +67,9 @@ function handleClose() {
           class="mt-0.5 h-4 w-4 rounded border-surface-300 text-brand-600 focus:ring-brand-500"
         />
         <div>
-          <p class="text-sm font-medium text-surface-800">自动调整后续时间</p>
+          <p class="text-sm font-medium text-surface-800">{{ t('swapConfirm.autoAdjust') }}</p>
           <p class="mt-0.5 text-xs text-surface-500">
-            根据新的时长自动重新计算后续活动的行程安排
+            {{ t('swapConfirm.autoAdjustHint') }}
           </p>
         </div>
       </label>
@@ -77,13 +80,13 @@ function handleClose() {
         class="rounded-lg border border-surface-200 bg-white px-4 py-2 text-sm font-medium text-surface-700 transition-colors hover:bg-surface-50"
         @click="handleClose"
       >
-        取消
+        {{ t('swap.cancel') }}
       </button>
       <button
         class="rounded-lg bg-gradient-to-r from-brand-500 to-accent-500 px-5 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:from-brand-600 hover:to-accent-600 hover:shadow-md active:scale-95"
         @click="handleConfirm"
       >
-        确认替换
+        {{ t('swap.confirm') }}
       </button>
     </template>
   </UIModal>

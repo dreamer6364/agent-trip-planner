@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t, locale } = useI18n()
 
 const props = defineProps<{
   dayNumber: number
@@ -14,15 +17,15 @@ onMounted(() => {
   })
 })
 
-const formattedDate = () => {
+const formattedDate = computed(() => {
   if (!props.dateStr) return ''
   const date = new Date(props.dateStr)
-  return date.toLocaleDateString('zh-CN', {
+  return date.toLocaleDateString(locale.value, {
     month: 'long',
     day: 'numeric',
     weekday: 'short',
   })
-}
+})
 </script>
 
 <template>
@@ -47,10 +50,10 @@ const formattedDate = () => {
       </div>
       <div class="flex flex-col">
         <span class="text-sm font-semibold text-surface-900 dark:text-white">
-          第 {{ dayNumber }} 天
+          {{ t('timeline.day', { n: dayNumber }) }}
         </span>
         <span class="text-xs text-surface-500 dark:text-surface-400">
-          {{ formattedDate() }}
+          {{ formattedDate }}
         </span>
       </div>
     </div>

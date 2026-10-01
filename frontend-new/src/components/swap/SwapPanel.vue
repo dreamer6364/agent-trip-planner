@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { tripApi } from '@/api/trip'
 import { planApi } from '@/api/plan'
 import { useToast } from '@/composables/useToast'
@@ -29,6 +30,7 @@ const emit = defineEmits<{
 }>()
 
 const toast = useToast()
+const { t } = useI18n()
 
 const alternatives = ref<ActivityAlternative[]>([])
 const loading = ref(false)
@@ -80,7 +82,7 @@ async function doSearch() {
     searchResults.value = (list || []).map(mapSearchItem)
   } catch (e: any) {
     searchResults.value = []
-    toast.error(e?.message || '搜索失败，请重试')
+    toast.error(e?.message || t('swap.searchFailed'))
   } finally {
     searching.value = false
   }
@@ -239,7 +241,7 @@ onUnmounted(() => {
               <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-100">
                 <i class="ri-loop-right-line text-accent-600 text-lg" />
               </div>
-              <h3 class="text-base font-semibold text-surface-900">备选景点</h3>
+              <h3 class="text-base font-semibold text-surface-900">{{ t('swap.title') }}</h3>
             </div>
             <button
               class="flex h-8 w-8 items-center justify-center rounded-lg text-surface-400 transition-colors hover:bg-surface-100 hover:text-surface-600"
@@ -253,7 +255,7 @@ onUnmounted(() => {
 
           <!-- Current Activity Info -->
           <div v-if="activity" class="border-b border-surface-100 bg-surface-50 px-5 py-4">
-            <p class="mb-2 text-xs font-medium uppercase tracking-wider text-surface-500">当前景点</p>
+            <p class="mb-2 text-xs font-medium uppercase tracking-wider text-surface-500">{{ t('swap.current') }}</p>
             <div class="flex items-center gap-3">
               <div
                 :class="[
@@ -268,7 +270,7 @@ onUnmounted(() => {
                 <div class="mt-0.5 flex items-center gap-2">
                   <span class="text-xs text-surface-500">{{ activity.type }}</span>
                   <span class="text-surface-300">·</span>
-                  <span class="text-xs text-surface-500">序号 {{ activity.seq }}</span>
+                  <span class="text-xs text-surface-500">{{ t('swap.seqLabel', { n: activity.seq }) }}</span>
                 </div>
               </div>
             </div>
@@ -281,7 +283,7 @@ onUnmounted(() => {
               <input
                 v-model="searchKeyword"
                 type="text"
-                placeholder="搜索想换去的地点，如「宋城」"
+                :placeholder="t('swap.searchPlaceholder')"
                 class="w-full rounded-lg border border-surface-200 bg-surface-50 py-2.5 pl-9 pr-9 text-sm text-surface-700 outline-none transition-colors placeholder:text-surface-400 focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-500/15"
                 @input="onSearchInput"
                 @keydown.enter.prevent="doSearch"
@@ -289,14 +291,14 @@ onUnmounted(() => {
               <button
                 v-if="searchKeyword"
                 class="absolute right-2.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-surface-400 transition-colors hover:bg-surface-200 hover:text-surface-600"
-                title="清除搜索"
+                :title="t('swap.clearSearch')"
                 @click="clearSearch"
               >
                 <i class="ri-close-line text-sm" />
               </button>
             </div>
             <p class="mt-1.5 text-[11px] leading-relaxed text-surface-400">
-              输入名称搜索任意地点，选中即替换当前景点，距离与时间自动重算
+              {{ t('swap.searchHint') }}
             </p>
           </div>
 
@@ -320,7 +322,7 @@ onUnmounted(() => {
               <!-- 结果列表 -->
               <div v-else-if="searchResults.length > 0" class="space-y-3">
                 <p class="mb-1 text-xs font-medium uppercase tracking-wider text-surface-500">
-                  搜索结果（{{ searchResults.length }}）
+                  {{ t('swap.searchResults', { n: searchResults.length }) }}
                 </p>
                 <AlternativeCard
                   v-for="alt in searchResults"
@@ -335,13 +337,13 @@ onUnmounted(() => {
                 <div class="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-surface-100">
                   <i class="ri-search-2-line text-3xl text-surface-400" />
                 </div>
-                <p class="text-sm font-medium text-surface-700">未找到「{{ searchKeyword.trim() }}」相关地点</p>
-                <p class="mt-1 text-xs text-surface-500">换个关键词试试，或清除搜索查看推荐备选</p>
+                <p class="text-sm font-medium text-surface-700">{{ t('swap.searchEmptyTitle', { kw: searchKeyword.trim() }) }}</p>
+                <p class="mt-1 text-xs text-surface-500">{{ t('swap.searchEmptyHint') }}</p>
                 <button
                   class="mt-3 text-sm font-medium text-brand-600 hover:text-brand-700"
                   @click="clearSearch"
                 >
-                  查看推荐备选
+                  {{ t('swap.viewRecommended') }}
                 </button>
               </div>
             </template>

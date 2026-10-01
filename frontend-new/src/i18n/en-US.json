@@ -31,7 +31,14 @@
     "registerSuccess": "Registered successfully",
     "passwordHint": "Password must be at least 8 characters and include upper and lower case letters, a digit and a special character ({'@$!%*?&'})",
     "loginFailed": "Login failed, please try again",
-    "registerFailed": "Sign up failed, please try again"
+    "registerFailed": "Sign up failed, please try again",
+    "required": "{field} is required",
+    "invalidEmail": "Please enter a valid email address",
+    "nameTooShort": "Username must be at least 2 characters",
+    "pleaseConfirmPassword": "Please confirm your password",
+    "passwordMismatch": "Passwords do not match",
+    "oauthComingSoon": "{provider} sign-in coming soon",
+    "orContinueWith": "or continue with"
   },
   "dashboard": {
     "title": "My Trips",
@@ -41,7 +48,30 @@
     "filterPlanning": "Planning",
     "filterCompleted": "Completed",
     "empty": "No trips yet. Start planning!",
-    "createFirst": "Create your first trip"
+    "createFirst": "Create your first trip",
+    "traveler": "Traveler",
+    "workbench": "Trip Workspace",
+    "greeting": "Hello, {name}",
+    "todayPrompt": "What would you like to plan today?",
+    "actionCreateDesc": "Describe it in one sentence and AI builds the full itinerary",
+    "actionCreateChip": "Start now",
+    "actionContinueTitle": "Continue Trip",
+    "openTripDesc": "Open “{title}”",
+    "noActiveTrip": "No trip in progress",
+    "recentlyOpened": "Recently opened",
+    "goCreate": "Create one",
+    "publicTrips": "Public Trips",
+    "communityCount": "Discover {n} community trips",
+    "publicActionDesc": "Browse itineraries from other travelers",
+    "goDiscover": "Explore",
+    "exploringChip": "Exploring",
+    "goNow": "Go now",
+    "tripCount": "{n} trips",
+    "emptyTitle": "No trips yet",
+    "emptyDesc": "Plan your very first journey",
+    "publicSubtitle": "Discover routes shared by other travelers",
+    "viewAll": "View all",
+    "publicEmpty": "No public trips yet — share yours from the trip page"
   },
   "trip": {
     "create": "New Trip",
@@ -72,7 +102,11 @@
     "day": "Day {n}",
     "today": "Today",
     "dragHint": "Drag to reorder",
-    "noActivities": "No activities planned"
+    "noActivities": "No activities planned",
+    "toNext": "Next stop · {info}",
+    "focusInMap": "Click to locate on map",
+    "viewOnMap": "View on map",
+    "swapPosition": "Swap position"
   },
   "activity": {
     "visit": "Visit",
@@ -82,7 +116,16 @@
     "shopping": "Shopping",
     "museum": "Museum",
     "park": "Park",
-    "temple": "Temple"
+    "temple": "Temple",
+    "attraction": "Attraction",
+    "museumLabel": "Museum",
+    "rest": "Rest",
+    "perPerson": "Avg ¥{cost}",
+    "priority": {
+      "must": "Must-see",
+      "recommended": "Recommended",
+      "optional": "Optional"
+    }
   },
   "swap": {
     "title": "Alternatives",
@@ -93,7 +136,16 @@
     "cancel": "Cancel",
     "loading": "Finding alternatives...",
     "empty": "No alternatives found",
-    "success": "Swap successful"
+    "success": "Swap successful",
+    "seqLabel": "No. {n}",
+    "searchPlaceholder": "Search a place to swap in, e.g. \"Songcheng\"",
+    "clearSearch": "Clear search",
+    "searchHint": "Search any place by name — select one to replace the current spot; distance and time recalculate automatically",
+    "searchResults": "Search results ({n})",
+    "searchEmptyTitle": "No places found for \"{kw}\"",
+    "searchEmptyHint": "Try another keyword, or clear the search to see recommended alternatives",
+    "viewRecommended": "View recommended alternatives",
+    "searchFailed": "Search failed, please try again"
   },
   "planning": {
     "title": "AI Planning",
@@ -104,7 +156,8 @@
       "model": "Build Model",
       "solve": "Optimize",
       "route": "Route Plan",
-      "persist": "Save Results"
+      "persist": "Save Results",
+      "verifyCity": "Verify City"
     },
     "completed": "Planning Complete",
     "failed": "Planning Failed",
@@ -127,7 +180,17 @@
     "pdf": "Export PDF",
     "json": "Export JSON",
     "ics": "Export Calendar",
-    "exporting": "Exporting..."
+    "exporting": "Exporting...",
+    "formatLabel": "Export format",
+    "includeMap": "Include map",
+    "includeStats": "Include statistics",
+    "descJson": "Structured data format",
+    "descPdf": "Great for printing and sharing",
+    "descIcs": "Import into calendar apps",
+    "exported": "Exported {name}",
+    "failNoUrl": "Export failed: no download URL",
+    "failed": "Export failed, please try again",
+    "exportAction": "Export {format}"
   },
   "notification": {
     "title": "Notifications",
@@ -135,7 +198,16 @@
     "markAllRead": "Mark all read",
     "progress": "Planning Progress",
     "completed": "Planning Complete",
-    "failed": "Planning Failed"
+    "failed": "Planning Failed",
+    "emptyHint": "New messages will show up here",
+    "viewAll": "View all",
+    "time": {
+      "justNow": "Just now",
+      "minutesAgo": "{n} min ago",
+      "hoursAgo": "{n} hr ago",
+      "daysAgo": "{n} days ago",
+      "dateShort": "{m}/{d}"
+    }
   },
   "profile": {
     "title": "Profile",
@@ -152,7 +224,33 @@
     "changePassword": "Change Password",
     "currentPassword": "Current Password",
     "newPassword": "New Password",
-    "confirmNewPassword": "Confirm New Password"
+    "confirmNewPassword": "Confirm New Password",
+    "tabProfile": "Personal Info",
+    "tabPreferences": "Preferences",
+    "tabSecurity": "Security",
+    "dateFormat": "MMM D, YYYY",
+    "memberSince": "Joined {date}",
+    "themeLight": "Light Mode",
+    "themeDark": "Dark Mode",
+    "themeLabel": "Theme",
+    "language": "Language",
+    "nameRequired": "Please enter a username",
+    "saveProfileSuccess": "Profile saved",
+    "saveFailed": "Save failed. Please try again",
+    "savePrefsSuccess": "Preferences saved",
+    "savePrefs": "Save Preferences",
+    "currentPasswordRequired": "Please enter your current password",
+    "newPasswordRequired": "Please enter a new password",
+    "passwordTooShort": "Password must be at least 8 characters",
+    "confirmNewPasswordRequired": "Please confirm your new password",
+    "passwordMismatch": "The two passwords do not match",
+    "passwordChangeSuccess": "Password changed successfully",
+    "passwordChangeFailed": "Failed to change password. Please check your current password",
+    "userFallback": "User",
+    "avatarLabel": "Avatar URL",
+    "avatarHint": "Paste an image URL to set a custom avatar",
+    "newPasswordPlaceholder": "Enter new password (at least 8 characters)",
+    "confirmPasswordPlaceholder": "Re-enter your new password"
   },
   "common": {
     "confirm": "Confirm",
@@ -164,7 +262,8 @@
     "error": "Something went wrong",
     "retry": "Retry",
     "noData": "No data",
-    "back": "Back"
+    "back": "Back",
+    "totalCount": "{n} trips"
   },
   "landing": {
     "hero": {
@@ -194,7 +293,8 @@
       "trips": "100K+ Trips",
       "satisfaction": "99% Satisfaction"
     },
-    "footer": "Powered by TripForge © 2026"
+    "footer": "Powered by TripForge © 2026",
+    "bigUnit": "K"
   },
   "tripCreate": {
     "title": "AI Trip Planner",
@@ -215,7 +315,15 @@
     },
     "tips": {
       "title": "Planning Tips",
-      "hint": "The more specific your description (city, days, preferences, must-see spots), the better the AI itinerary."
+      "hint": "The more specific your description (city, days, preferences, must-see spots), the better the AI itinerary.",
+      "style": "Describe the travel style you like",
+      "city": "Mentioning specific city names works better",
+      "transport": "You can specify the transport mode"
+    },
+    "toasts": {
+      "createSuccess": "Trip created! AI has generated your full itinerary",
+      "timeout": "AI planning timed out. Retry later from the trip details",
+      "createFailed": "Failed to create the trip, please try again"
     }
   },
   "parseSummary": {
@@ -227,5 +335,327 @@
     "meals": "{count} meals",
     "rawTitle": "Original description",
     "quoteTip": "Quoted from your description"
+  },
+  "planningProgress": {
+    "descriptions": {
+      "parseInput": "Parsing your trip requirements...",
+      "geocode": "Fetching location coordinates...",
+      "model": "Building the optimization model...",
+      "solve": "Computing the optimal route...",
+      "route": "Planning the detailed itinerary...",
+      "verifyCity": "Verifying spot city attribution...",
+      "saveResult": "Saving planning results..."
+    },
+    "completedDesc": "Trip planning completed successfully!",
+    "failedFallback": "An error occurred during planning",
+    "preparing": "Preparing...",
+    "replan": "Re-plan"
+  },
+  "planningStats": {
+    "title": "Solver Stats",
+    "algorithm": "Algorithm",
+    "solveTime": "Solve Time",
+    "iterations": "Iterations",
+    "objective": "Objective"
+  },
+  "shareDialog": {
+    "createFailed": "Failed to create share link",
+    "revokeFailed": "Failed to revoke sharing",
+    "publicAccess": "Public access",
+    "anyoneWithLink": "Anyone with the link can view",
+    "authorizedOnly": "Only authorized users can view",
+    "passwordLabel": "Password protection (optional)",
+    "passwordPlaceholder": "Set an access password",
+    "expireLabel": "Link validity",
+    "linkLabel": "Share link",
+    "copy": "Copy",
+    "copied": "Copied",
+    "expiresAt": "Expires: {date}",
+    "done": "Done",
+    "createLink": "Generate Share Link"
+  },
+  "shareView": {
+    "dateFull": "{y}-{m}-{d}",
+    "dateShort": "{m}/{d}",
+    "description": "Trip description",
+    "spotCount": "Spots",
+    "totalDuration": "Total time",
+    "visitDuration": "Visit time",
+    "transitDuration": "Transit time",
+    "timeline": "Itinerary Timeline",
+    "empty": "No itinerary data",
+    "navTitle": "Click to navigate this leg",
+    "type": {
+      "attraction": "Attraction",
+      "restaurant": "Restaurant",
+      "entertainment": "Entertainment",
+      "break": "Break",
+      "activity": "Activity"
+    },
+    "priority": {
+      "must": "Must-see",
+      "recommended": "Recommended",
+      "optional": "Optional"
+    }
+  },
+  "swapConfirm": {
+    "current": "Current",
+    "replacedWith": "Replace with",
+    "autoAdjust": "Auto-adjust following times",
+    "autoAdjustHint": "Recalculate the schedule of following activities based on the new duration"
+  },
+  "transit": {
+    "walk": "Walking",
+    "transit": "Bus/Metro",
+    "drive": "Driving",
+    "bike": "Cycling",
+    "navHint": "Click to navigate this leg"
+  },
+  "map": {
+    "details": "Activity Details",
+    "schedule": "Schedule",
+    "duration": "Duration",
+    "priority": "Priority",
+    "status": "Status",
+    "rating": "Rating",
+    "perPerson": "Per person",
+    "notes": "Notes",
+    "address": "Address",
+    "viewInTimeline": "View in Timeline",
+    "durationMinutes": "{n} min",
+    "durationHoursMinutes": "{h} hr {m} min",
+    "durationHours": "{h} hr"
+  },
+  "tripMap": {
+    "loading": "Loading map…",
+    "title": "Trip Map",
+    "subtitle": "Attractions and routes at a glance",
+    "loadFailedNote": "Map failed to load; trip points are listed below",
+    "toggleType": "Switch map type",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "placeTypes": "Place types",
+    "loadingRoutes": "Loading routes…"
+  },
+  "tripCard": {
+    "moreActions": "More actions",
+    "deleted": "Trip deleted",
+    "deleteFailed": "Delete failed, please try again",
+    "authorId": "Author ID",
+    "author": "Author {id}",
+    "deleteConfirmBefore": "Are you sure you want to delete \"",
+    "deleteConfirmAfter": "\"? This cannot be undone.",
+    "deleting": "Deleting...",
+    "confirmDelete": "Confirm Delete"
+  },
+  "tripForm": {
+    "defaultTitle": "AI Trip Plan",
+    "descriptionLabel": "Trip description for AI",
+    "descriptionPlaceholder": "e.g. I want to spend 3 days in Beijing, visit the Forbidden City, Great Wall and Summer Palace, and try roast duck...",
+    "aiParse": "AI-powered parsing",
+    "startTime": "Start time",
+    "endTime": "End time",
+    "titlePlaceholder": "Give your trip a name (optional)",
+    "planning": "AI planning...",
+    "startPlan": "Start AI Planning"
+  },
+  "tripStats": {
+    "totalDuration": "Total time",
+    "spots": "Spots",
+    "transit": "Transit",
+    "visit": "Sightseeing"
+  },
+  "tripStatus": {
+    "draft": "Draft",
+    "planning": "Planning",
+    "planned": "Planned",
+    "completed": "Completed",
+    "archived": "Archived"
+  },
+  "aiIntro": {
+    "stages": {
+      "parse": {
+        "title": "Parse Requirements",
+        "desc": "Extract cities, days and travel preferences"
+      },
+      "select": {
+        "title": "Smart Spot Selection",
+        "desc": "Pick attractions and restaurants and plan the daily pace"
+      },
+      "route": {
+        "title": "Route Planning",
+        "desc": "Compute real travel distances and times with Amap"
+      },
+      "generate": {
+        "title": "Generate Itinerary",
+        "desc": "Produce the full itinerary and daily routes"
+      }
+    },
+    "elapsedSeconds": "{n}s elapsed",
+    "elapsedMinutes": "{m}m {n}s elapsed",
+    "planningTitle": "AI is planning your trip",
+    "confirmTitle": "Start AI trip planning?",
+    "durationHint": "Usually takes 30s – 2min",
+    "willDo": "After submitting, AI will automatically do the following",
+    "estimateBefore": "Estimated time: ",
+    "estimateDuration": "30s – 2min",
+    "estimateAfter": ". Keep this page open while planning; you'll go to the progress page automatically when it's done.",
+    "generating": "Generating your itinerary · {elapsed}",
+    "dontClose": "Don't close or refresh this page while planning, or generation may be interrupted.",
+    "locked": "Can't close while planning"
+  },
+  "notificationBell": {
+    "justNow": "Just now",
+    "minutesAgo": "{n}m ago",
+    "hoursAgo": "{n}h ago",
+    "daysAgo": "{n}d ago",
+    "collapse": "Collapse"
+  },
+  "api": {
+    "status400": "Invalid request parameters",
+    "status401": "Not logged in or session expired",
+    "status403": "You don't have permission for this action",
+    "status404": "Requested resource not found",
+    "status409": "Conflict, please refresh and try again",
+    "status429": "Too many requests, please try again later",
+    "status500": "Internal server error, please try again later",
+    "status502": "Service temporarily unavailable, please try again later",
+    "status503": "Service temporarily unavailable, please try again later",
+    "statusFailWith": "Request failed ({status})",
+    "statusFail": "Request failed, please retry",
+    "timeout": "Request timed out, please retry",
+    "network": "Network error, please check your connection and retry"
+  },
+  "transport": {
+    "walk": "Walking",
+    "transit": "Bus/Metro",
+    "drive": "Driving",
+    "bike": "Cycling",
+    "subway": "Subway",
+    "taxi": "Taxi",
+    "mixed": "Mixed"
+  },
+  "duration": {
+    "zero": "0 min",
+    "minutes": "{m} min",
+    "hours": "{h} hr",
+    "hoursMinutes": "{h} hr {m} min"
+  },
+  "compare": {
+    "versionLabel": "Version {num} · {date} · {count} items",
+    "selectVersion": "Select a version",
+    "swapTitle": "Swap left and right versions",
+    "needTwo": "At least two versions are required to compare",
+    "noData": "The selected version has no itinerary data",
+    "notInVersion": "— Not in this version —",
+    "minutes": " min",
+    "type": {
+      "visit": "Attraction",
+      "museum": "Museum",
+      "rest": "Rest"
+    },
+    "meal": {
+      "breakfast": "Breakfast",
+      "lunch": "Lunch",
+      "dinner": "Dinner",
+      "afternoonTea": "Afternoon tea",
+      "lateNight": "Late-night snack",
+      "snack": "Snack"
+    },
+    "status": {
+      "kept": "Kept",
+      "changed": "Changed",
+      "added": "Added",
+      "removed": "Removed"
+    },
+    "change": {
+      "time": "Time",
+      "duration": "Duration",
+      "order": "Order",
+      "mealSwap": "{meal} venue changed",
+      "sep": ", "
+    },
+    "stats": {
+      "activities": "Activities",
+      "visit": "Sightseeing",
+      "transit": "Transit",
+      "meals": "Meals",
+      "minutes": " min",
+      "flat": "no change"
+    }
+  },
+  "explore": {
+    "kicker": "Community Inspiration",
+    "subtitle": "Browse complete itineraries shared by other travelers",
+    "searchPlaceholder": "Search places, titles, or descriptions...",
+    "clearSearch": "Clear search",
+    "searchHint": "Search by city, attraction, restaurant, and other place names",
+    "loadError": "Failed to load public trips. Please try again later.",
+    "noResultsTitle": "No trips found for “{keyword}”",
+    "noResultsDesc": "Try another place or keyword, like a city, attraction, or restaurant",
+    "emptyTitle": "No public trips yet",
+    "emptyDesc": "Turn on public sharing in the trip details so more people can see your route",
+    "backToMyTrips": "Back to My Trips"
+  },
+  "tripDetail": {
+    "versionCurrent": " (current)",
+    "versionOption": "v{version} · {date} · {count} items{current}",
+    "replan": "Re-plan",
+    "duplicate": "Duplicate Trip",
+    "archive": "Archive Trip",
+    "titleUpdated": "Title updated",
+    "titleUpdateFailed": "Failed to update title",
+    "untitled": "Trip",
+    "duplicateTitle": "{title} - Copy",
+    "duplicated": "Trip duplicated",
+    "duplicateFailed": "Failed to duplicate trip",
+    "archived": "Trip archived",
+    "archiveFailed": "Failed to archive",
+    "deleted": "Trip deleted",
+    "deleteFailed": "Failed to delete",
+    "swapSuccess": "Activity swapped",
+    "reorderSuccess": "Activity order updated",
+    "editTitleHint": "Click to edit title",
+    "moreActions": "More actions",
+    "tabTimeline": "Timeline",
+    "tabMap": "Map",
+    "tabCompare": "Compare",
+    "variantHint": "Variation planning: same theme, a different route",
+    "createVersion": "New Version",
+    "emptyTitle": "No itinerary data",
+    "emptyDesc": "No activities planned in this version",
+    "addActivity": "Add Activity",
+    "addShort": "Add",
+    "confirmDelete": "Confirm Delete",
+    "deleteConfirmText": "This cannot be undone. Are you sure you want to delete this trip?"
+  },
+  "planningPage": {
+    "tripNotFound": "Trip not found",
+    "planningNow": "AI is planning your trip...",
+    "starting": "Starting AI planning...",
+    "variantStarted": "Variation planning started: same theme, a different route",
+    "planDoneLoading": "Planning complete, loading results",
+    "slowContinue": "AI planning is taking longer than usual, keep waiting...",
+    "startFailed": "Could not start planning, please try again later",
+    "errorGeneric": "Something went wrong during planning",
+    "planSuccessToast": "Trip planning completed!",
+    "completedTitle": "Planning Complete!",
+    "completedDesc": "Your itinerary is ready, redirecting you now",
+    "errorRetry": "Something went wrong during planning. Please retry.",
+    "preparing": "Preparing...",
+    "viewTrip": "View Trip",
+    "autoRedirect": "Redirecting in {seconds}s..."
+  },
+  "sharePage": {
+    "loadFailed": "Failed to load the trip, please try again later",
+    "enterPassword": "Enter the access password",
+    "passwordWrong": "Incorrect password, please try again",
+    "loadingTrip": "Loading trip...",
+    "notFoundTitle": "Trip not found or expired",
+    "notFoundDesc": "This share link is invalid or has expired. Contact the trip owner for a new link.",
+    "backHome": "Back to Home",
+    "passwordTitle": "This trip requires a password",
+    "passwordDesc": "Enter the access password provided by the trip owner",
+    "unlock": "Unlock"
   }
 }

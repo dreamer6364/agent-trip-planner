@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { Activity, TripVersion } from '@/api/types'
 import { normalizeActivities, formatTimePoint, computeStatsFromActivities } from '@/utils/activity'
 
@@ -23,16 +24,18 @@ const emit = defineEmits<{
   'update:right': [id: string]
 }>()
 
-const TYPE_LABELS: Record<string, string> = {
-  visit: '景点',
-  meal: '用餐',
-  transit: '交通',
-  museum: '博物馆',
-  park: '公园',
-  temple: '寺庙',
-  shopping: '购物',
-  rest: '休息',
-}
+const { t, locale } = useI18n()
+
+const TYPE_LABELS = computed<Record<string, string>>(() => ({
+  visit: t('compare.type.visit'),
+  meal: t('activity.meal'),
+  transit: t('activity.transit'),
+  museum: t('compare.type.museum'),
+  park: t('activity.park'),
+  temple: t('activity.temple'),
+  shopping: t('activity.shopping'),
+  rest: t('compare.type.rest'),
+}))
 
 function versionActs(v?: TripVersion): Activity[] {
   if (!v) return []
@@ -45,9 +48,9 @@ const leftActs = computed(() => versionActs(leftVersion.value))
 const rightActs = computed(() => versionActs(rightVersion.value))
 
 function versionLabel(v?: TripVersion): string {
-  if (!v) return '选择版本'
-  const date = new Date(v.createdAt).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
-  return `版本 ${v.versionNum} · ${date} · ${normalizeActivities(v.activities).length}项`
+  if (!v) return t('compare.selectVersion')
+  const date = new Date(v.createdAt).toLocaleDateString(locale.value, { month: 'numeric', day: 'numeric' })
+  return t('compare.versionLabel', { num: v.versionNum, date, count: normalizeActivities(v.activities).length })
 }
 
 function swapSides() {
@@ -58,19 +61,27 @@ function swapSides() {
 
 const normName = (n: string) => n.replace(/\s+/g, '')
 
-const MEAL_WORDS = ['早餐', '午餐', '晚餐', '下午茶', '夜宵'] as const
+type MealSlot = 'breakfast' | 'lunch' | 'dinner' | 'afternoonTea' | 'lateNight' | 'snack'
+
+const MEAL_WORDS: Record<string, MealSlot> = {
+  早餐: 'breakfast',
+  午餐: 'lunch',
+  晚餐: 'dinner',
+  下午茶: 'afternoonTea',
+  夜宵: 'lateNight',
+}
 
 /** 餐次槽位：优先取名称里的餐段词，其次按开始时间推断（v1.18.0 换版对比用） */
-function mealSlot(a: Activity): string {
+function mealSlot(a: Activity): MealSlot {
   const name = a.poiName || ''
-  const hit = MEAL_WORDS.find((w) => name.includes(w))
-  if (hit) return hit
+  const hit = Object.keys(MEAL_WORDS).find((w) => name.includes(w))
+  if (hit) return MEAL_WORDS[hit]
   const hm = String(a.scheduledStart || '').match(/(\d{1,2}):(\d{2})/)
   const min = hm ? Number(hm[1]) * 60 + Number(hm[2]) : 12 * 60
-  if (min < 10 * 60 + 30) return '早餐'
-  if (min < 14 * 60 + 30) return '午餐'
-  if (min >= 16 * 60 + 30) return '晚餐'
-  return '加餐'
+  if (min < 10 * 60 + 30) return 'breakfast'
+  if (min < 14 * 60 + 30) return 'lunch'
+  if (min >= 16 * 60 + 30) return 'dinner'
+  return 'snack'
 }
 
 interface DiffRow {
@@ -108,10 +119,10 @@ const rows = computed<DiffRow[]>(() => {
     rightMatched.add(r)
     const changes: string[] = []
     if (formatTimePoint(l.scheduledStart) !== formatTimePoint(r.scheduledStart) ||
-        formatTimePoint(l.scheduledEnd) !== formatTimePoint(r.scheduledEnd)) changes.push('时间')
+        formatTimePoint(l.scheduledEnd) !== formatTimePoint(r.scheduledEnd)) changes.push(t('compare.change.time'))
     if (String(l.day || 1) !== String(r.day || 1)) changes.push(`D${l.day || 1}→D${r.day || 1}`)
-    if ((l.durationMin || 0) !== (r.durationMin || 0)) changes.push('时长')
-    if (String(l.day || 1) === String(r.day || 1) && (l.seq || 0) !== (r.seq || 0)) changes.push('顺序')
+    if ((l.durationMin || 0) !== (r.durationMin || 0)) changes.push(t('compare.change.duration'))
+    if (String(l.day || 1) === String(r.day || 1) && (l.seq || 0) !== (r.seq || 0)) changes.push(t('compare.change.order'))
     // 行归属：以旧版的天为组浏览，跨天移动通过 changes 标注
     out.push({
       key: `m${uid++}`,
@@ -142,9 +153,9 @@ const rows = computed<DiffRow[]>(() => {
     rightMatched.add(r)
     const changes: string[] = []
     if (formatTimePoint(l.scheduledStart) !== formatTimePoint(r.scheduledStart) ||
-        formatTimePoint(l.scheduledEnd) !== formatTimePoint(r.scheduledEnd)) changes.push('时间')
-    if ((l.durationMin || 0) !== (r.durationMin || 0)) changes.push('时长')
-    if (normName(l.poiName) !== normName(r.poiName)) changes.push(`${mealSlot(r)}换店`)
+        formatTimePoint(l.scheduledEnd) !== formatTimePoint(r.scheduledEnd)) changes.push(t('compare.change.time'))
+    if ((l.durationMin || 0) !== (r.durationMin || 0)) changes.push(t('compare.change.duration'))
+    if (normName(l.poiName) !== normName(r.poiName)) changes.push(t('compare.change.mealSwap', { meal: t(`compare.meal.${mealSlot(r)}`) }))
     out.push({
       key: `m${uid++}`,
       day: Number(l.day) || Number(r.day) || 1,
@@ -193,7 +204,7 @@ function dayDate(day: number): string {
   if (Number.isNaN(start.getTime())) return ''
   const d = new Date(start.getFullYear(), start.getMonth(), start.getDate())
   d.setDate(d.getDate() + day - 1)
-  return d.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'short' })
+  return d.toLocaleDateString(locale.value, { month: 'long', day: 'numeric', weekday: 'short' })
 }
 
 interface SideStats {
@@ -232,7 +243,7 @@ const summary = computed(() => {
 
 function deltaText(l: number, r: number, unit: string): string {
   const d = r - l
-  if (d === 0) return '持平'
+  if (d === 0) return t('compare.stats.flat')
   return `${d > 0 ? '+' : ''}${d}${unit}`
 }
 
@@ -249,11 +260,11 @@ function timeRange(a?: Activity): string {
   return s || e
 }
 
-const STATUS_META: Record<DiffRow['status'], { label: string; cls: string }> = {
-  kept: { label: '保留', cls: 'bg-surface-100 text-surface-600 dark:bg-surface-700 dark:text-surface-300' },
-  changed: { label: '调整', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' },
-  added: { label: '新增', cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' },
-  removed: { label: '移除', cls: 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300' },
+const STATUS_META: Record<DiffRow['status'], { labelKey: string; cls: string }> = {
+  kept: { labelKey: 'compare.status.kept', cls: 'bg-surface-100 text-surface-600 dark:bg-surface-700 dark:text-surface-300' },
+  changed: { labelKey: 'compare.status.changed', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' },
+  added: { labelKey: 'compare.status.added', cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' },
+  removed: { labelKey: 'compare.status.removed', cls: 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300' },
 }
 </script>
 
@@ -274,7 +285,7 @@ const STATUS_META: Record<DiffRow['status'], { label: string; cls: string }> = {
 
         <button
           class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface-100 text-surface-500 transition-colors hover:bg-surface-200 hover:text-surface-700 dark:bg-surface-700 dark:text-surface-300 dark:hover:bg-surface-600"
-          title="交换左右版本"
+          :title="t('compare.swapTitle')"
           @click="swapSides"
         >
           <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -300,10 +311,10 @@ const STATUS_META: Record<DiffRow['status'], { label: string; cls: string }> = {
             {{ versionLabel(leftVersion) }}
           </div>
           <div class="flex flex-wrap gap-x-3 gap-y-0.5 text-surface-500 dark:text-surface-400">
-            <span>活动 <b class="text-surface-700 dark:text-surface-200">{{ leftStats.total }}</b></span>
-            <span>游览 <b class="text-surface-700 dark:text-surface-200">{{ leftStats.visitMin }}</b>分</span>
-            <span>交通 <b class="text-surface-700 dark:text-surface-200">{{ leftStats.transitMin }}</b>分</span>
-            <span>餐次 <b class="text-surface-700 dark:text-surface-200">{{ leftStats.mealCount }}</b></span>
+            <span>{{ t('compare.stats.activities') }} <b class="text-surface-700 dark:text-surface-200">{{ leftStats.total }}</b></span>
+            <span>{{ t('compare.stats.visit') }} <b class="text-surface-700 dark:text-surface-200">{{ leftStats.visitMin }}</b>{{ t('compare.stats.minutes') }}</span>
+            <span>{{ t('compare.stats.transit') }} <b class="text-surface-700 dark:text-surface-200">{{ leftStats.transitMin }}</b>{{ t('compare.stats.minutes') }}</span>
+            <span>{{ t('compare.stats.meals') }} <b class="text-surface-700 dark:text-surface-200">{{ leftStats.mealCount }}</b></span>
           </div>
         </div>
         <div class="rounded-lg bg-brand-50 px-3 py-2 dark:bg-brand-900/20">
@@ -311,16 +322,16 @@ const STATUS_META: Record<DiffRow['status'], { label: string; cls: string }> = {
             {{ versionLabel(rightVersion) }}
           </div>
           <div class="flex flex-wrap gap-x-3 gap-y-0.5 text-surface-500 dark:text-surface-400">
-            <span>活动 <b :class="deltaClass(leftStats.total, rightStats.total)">{{ rightStats.total }}</b>
+            <span>{{ t('compare.stats.activities') }} <b :class="deltaClass(leftStats.total, rightStats.total)">{{ rightStats.total }}</b>
               <em class="not-italic text-[10px]" :class="deltaClass(leftStats.total, rightStats.total)">({{ deltaText(leftStats.total, rightStats.total, '') }})</em>
             </span>
-            <span>游览 <b :class="deltaClass(leftStats.visitMin, rightStats.visitMin)">{{ rightStats.visitMin }}</b>分
-              <em class="not-italic text-[10px]" :class="deltaClass(leftStats.visitMin, rightStats.visitMin)">({{ deltaText(leftStats.visitMin, rightStats.visitMin, '分') }})</em>
+            <span>{{ t('compare.stats.visit') }} <b :class="deltaClass(leftStats.visitMin, rightStats.visitMin)">{{ rightStats.visitMin }}</b>{{ t('compare.stats.minutes') }}
+              <em class="not-italic text-[10px]" :class="deltaClass(leftStats.visitMin, rightStats.visitMin)">({{ deltaText(leftStats.visitMin, rightStats.visitMin, t('compare.stats.minutes')) }})</em>
             </span>
-            <span>交通 <b :class="deltaClass(leftStats.transitMin, rightStats.transitMin)">{{ rightStats.transitMin }}</b>分
-              <em class="not-italic text-[10px]" :class="deltaClass(leftStats.transitMin, rightStats.transitMin)">({{ deltaText(leftStats.transitMin, rightStats.transitMin, '分') }})</em>
+            <span>{{ t('compare.stats.transit') }} <b :class="deltaClass(leftStats.transitMin, rightStats.transitMin)">{{ rightStats.transitMin }}</b>{{ t('compare.stats.minutes') }}
+              <em class="not-italic text-[10px]" :class="deltaClass(leftStats.transitMin, rightStats.transitMin)">({{ deltaText(leftStats.transitMin, rightStats.transitMin, t('compare.stats.minutes')) }})</em>
             </span>
-            <span>餐次 <b :class="deltaClass(leftStats.mealCount, rightStats.mealCount)">{{ rightStats.mealCount }}</b></span>
+            <span>{{ t('compare.stats.meals') }} <b :class="deltaClass(leftStats.mealCount, rightStats.mealCount)">{{ rightStats.mealCount }}</b></span>
           </div>
         </div>
       </div>
@@ -328,16 +339,16 @@ const STATUS_META: Record<DiffRow['status'], { label: string; cls: string }> = {
       <!-- 差异摘要 -->
       <div class="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
         <span class="rounded-full bg-emerald-100 px-2 py-0.5 font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-          新增 {{ summary.added }}
+          {{ t('compare.status.added') }} {{ summary.added }}
         </span>
         <span class="rounded-full bg-rose-100 px-2 py-0.5 font-medium text-rose-700 dark:bg-rose-900/40 dark:text-rose-300">
-          移除 {{ summary.removed }}
+          {{ t('compare.status.removed') }} {{ summary.removed }}
         </span>
         <span class="rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
-          调整 {{ summary.changed }}
+          {{ t('compare.status.changed') }} {{ summary.changed }}
         </span>
         <span class="rounded-full bg-surface-100 px-2 py-0.5 font-medium text-surface-600 dark:bg-surface-700 dark:text-surface-300">
-          保留 {{ summary.kept }}
+          {{ t('compare.status.kept') }} {{ summary.kept }}
         </span>
       </div>
     </div>
@@ -348,14 +359,14 @@ const STATUS_META: Record<DiffRow['status'], { label: string; cls: string }> = {
         <svg class="mb-3 h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
           <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
         </svg>
-        <p class="text-sm">至少需要两个版本才能对比</p>
+        <p class="text-sm">{{ t('compare.needTwo') }}</p>
       </div>
 
       <template v-else-if="rows.length > 0">
         <div v-for="group in dayGroups" :key="group.day" class="mb-4">
           <div class="mb-2 flex items-center gap-2">
             <span class="rounded-lg bg-surface-900 px-2.5 py-1 text-xs font-bold text-white dark:bg-white dark:text-surface-900">
-              第 {{ group.day }} 天
+              {{ t('timeline.day', { n: group.day }) }}
             </span>
             <span v-if="dayDate(group.day)" class="text-xs text-surface-500 dark:text-surface-400">
               {{ dayDate(group.day) }}
@@ -392,14 +403,14 @@ const STATUS_META: Record<DiffRow['status'], { label: string; cls: string }> = {
               <div class="mt-1 flex flex-wrap gap-x-2 text-[11px] text-surface-500 dark:text-surface-400">
                 <span v-if="timeRange(row.left)" class="tabular-nums">{{ timeRange(row.left) }}</span>
                 <span>{{ TYPE_LABELS[row.left.activityType] || row.left.activityType }}</span>
-                <span>{{ row.left.durationMin }}分钟</span>
+                <span>{{ row.left.durationMin }}{{ t('compare.minutes') }}</span>
               </div>
             </div>
             <div
               v-else
               class="flex flex-1 items-center justify-center rounded-lg border border-dashed border-surface-200 text-xs text-surface-400 dark:border-surface-700"
             >
-              — 此版本无 —
+              {{ t('compare.notInVersion') }}
             </div>
 
             <!-- 状态徽标 + 变化点 -->
@@ -407,11 +418,11 @@ const STATUS_META: Record<DiffRow['status'], { label: string; cls: string }> = {
               <span
                 class="rounded px-1.5 py-0.5 text-[10px] font-bold"
                 :class="STATUS_META[row.status].cls"
-              >{{ STATUS_META[row.status].label }}</span>
+              >{{ t(STATUS_META[row.status].labelKey) }}</span>
               <span
                 v-if="row.changes.length"
                 class="text-center text-[9px] leading-tight text-surface-400 dark:text-surface-500"
-                :title="row.changes.join('、')"
+                :title="row.changes.join(t('compare.change.sep'))"
               >{{ row.changes.join(' ') }}</span>
             </div>
 
@@ -437,21 +448,21 @@ const STATUS_META: Record<DiffRow['status'], { label: string; cls: string }> = {
               <div class="mt-1 flex flex-wrap gap-x-2 text-[11px] text-surface-500 dark:text-surface-400">
                 <span v-if="timeRange(row.right)" class="tabular-nums">{{ timeRange(row.right) }}</span>
                 <span>{{ TYPE_LABELS[row.right.activityType] || row.right.activityType }}</span>
-                <span>{{ row.right.durationMin }}分钟</span>
+                <span>{{ row.right.durationMin }}{{ t('compare.minutes') }}</span>
               </div>
             </div>
             <div
               v-else
               class="flex flex-1 items-center justify-center rounded-lg border border-dashed border-surface-200 text-xs text-surface-400 dark:border-surface-700"
             >
-              — 此版本无 —
+              {{ t('compare.notInVersion') }}
             </div>
           </div>
         </div>
       </template>
 
       <div v-else class="flex h-full flex-col items-center justify-center text-surface-400">
-        <p class="text-sm">所选版本暂无行程数据</p>
+        <p class="text-sm">{{ t('compare.noData') }}</p>
       </div>
     </div>
   </div>

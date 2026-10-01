@@ -11,6 +11,37 @@ TripForge 的所有重要变更都会记录在此文件中。
 
 ---
 
+## [1.27.0] - 2026-10-01
+
+### 功能（中英文切换 i18n 全站落地）
+
+- **语言切换机制修复与统一**（此前切换按钮无效）：
+  - `i18n/index.ts` 新增 `applyLocale()` 单一入口：vue-i18n locale、`html lang`、dayjs locale 三处同步并持久化 `tf_locale`；`normalizeLocale()` 兼容历史 `'zh'/'en'` 与非法值
+  - `AppNavbar` 语言按钮原写入 `'zh'/'en'`，与注册的 `'zh-CN'/'en-US'` 不匹配 → 永远回退中文；改为经 `appStore.setLocale()` 全局应用（修复详见 BUGFIX 1.27.0）
+  - `stores/app.ts` `setLocale` 接入 `applyLocale`；`main.ts` 启动时应用已保存语言（移除硬编码 `dayjs.locale('zh-cn')`）
+- **全站 UI 迁移 vue-i18n**：45 个 `.vue`/`.ts` 文件的可见文案改为 `t()` 调用
+  - 覆盖页面：Dashboard/Explore/Landing/Auth/Profile/TripCreate/TripDetail/Planning/Share 及 trip、timeline、map、planning、notification、share、swap、version 全部分量
+  - 脚本内标签数组/映射统一改为 `computed(() => ... t())`，切换语言即时响应
+  - `utils/activity.ts`：`formatDurationText`/`TRANSPORT_LABELS` 内部改走 `i18n.global.t`（`TRANSPORT_LABELS` 用 Proxy 保持 `Record<string,string>` API，6 个消费方零改动，枚举/展开/下标读取均返回当前语言）
+  - `api/index.ts` HTTP 状态默认文案（超时/网络/4xx/5xx toast）i18n 化
+  - 日期格式硬编码 `'zh-CN'` 改为跟随 `locale.value`；删除 `NotificationItem` 组件内重复 `dayjs.locale('zh-cn')`
+- **语言包**：`zh-CN.json`/`en-US.json` 由 177 键扩充至 **531 键**（结构逐键对等），中文值与原界面文案保持一致，英文为对应翻译
+- **切换入口**：导航栏「中/EN」按钮、个人中心「语言」偏好，选择即时生效且刷新后保留
+- **保留中文的数据键**（非 UI 文案）：城市渐变键（北京/上海…）、餐次词匹配键（早餐/午餐…，用于匹配服务端中文 POI 名）、`CITY_CENTERS` 城市键、代码注释与日志
+- 涉及文件：`frontend-new/src/i18n/index.ts`、`zh-CN.json`、`en-US.json`、`main.ts`、`stores/app.ts`、`utils/activity.ts`、`api/index.ts`、39 个 `.vue` 组件/视图（详见 git 提交 `fix+feat(i18n)`）
+
+### 验证方式与结果（2026-10-01）
+
+| 项 | 结果 |
+|---|---|
+| 语言包合并校验（7 组并行产出 → 脚本深合并） | 531 键 zh/en 结构对等，0 冲突 ✓ |
+| `t()` 键覆盖率静态扫描（全 src） | 549 静态键 0 缺失；5 个动态键前缀逐一核对齐全 ✓ |
+| 残留中文扫描 | 30 文件仅剩注释、数据匹配键与预期字符（中/EN、中文语言名）✓ |
+| `npm run build`（vue-tsc + vite） | 构建通过（修复 1 处 TS7053 显式索引类型）✓ |
+| 产物双语抽查（本地 + 经网关字节级 UTF-8 校验） | zh「开始规划/我的行程」与 en「Start Planning/Network error」均在服务端 JS 中 ✓ |
+| 部署 | stop → build → robocopy → `mvn -o package -DskipTests` → 6/6 端口 UP，`GET /` 200 ✓ |
+| `node verify-rest.js` 回归 | pass=23 fail=0 ✓ |
+
 ## [1.26.1] - 2026-09-30
 
 ### 文档

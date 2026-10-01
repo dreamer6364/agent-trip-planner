@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import MapPanel from './MapPanel.vue'
 import { planApi } from '@/api/plan'
 import type { Activity, RouteInfo } from '@/api/types'
@@ -12,6 +13,8 @@ import {
   MODE_THEMES,
 } from '@/utils/mapTheme'
 import { openNavigation } from '@/utils/navigation'
+
+const { t } = useI18n()
 
 interface Props {
   activities: Activity[]
@@ -460,7 +463,7 @@ function buildInfoHtml(activity: Activity): string {
   const rating = Number(activity.rating)
   if (!Number.isNaN(rating) && rating > 0) bits.push(`★ ${rating.toFixed(1)}`)
   const cost = String(activity.cost ?? '').trim()
-  if (cost && cost !== '0') bits.push(cost.includes('¥') ? cost : `人均 ¥${cost}`)
+  if (cost && cost !== '0') bits.push(cost.includes('¥') ? cost : t('activity.perPerson', { cost }))
   const metaLine = bits.length
     ? `<div style="font-size:11px;color:#b45309;font-weight:600;margin-top:2px;">${escapeHtml(bits.join(' · '))}</div>`
     : ''
@@ -942,7 +945,7 @@ onUnmounted(() => {
       class="absolute inset-0 z-30 flex flex-col items-center justify-center bg-surface-50"
     >
       <div class="mb-3 h-10 w-10 animate-spin rounded-full border-[3px] border-brand-100 border-t-brand-500" />
-      <p class="text-sm font-medium text-surface-500">地图加载中…</p>
+      <p class="text-sm font-medium text-surface-500">{{ t('tripMap.loading') }}</p>
       <p v-if="city" class="mt-1 text-xs text-brand-600">{{ city }}</p>
     </div>
 
@@ -955,8 +958,8 @@ onUnmounted(() => {
         <div class="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-100">
           <i class="ri-map-2-line text-3xl text-brand-600" />
         </div>
-        <h3 class="text-lg font-semibold text-surface-800">行程地图</h3>
-        <p class="mt-1 text-sm text-surface-500">景点分布与路线可视化</p>
+        <h3 class="text-lg font-semibold text-surface-800">{{ t('tripMap.title') }}</h3>
+        <p class="mt-1 text-sm text-surface-500">{{ t('tripMap.subtitle') }}</p>
         <p v-if="city" class="mt-0.5 text-xs font-medium text-brand-600">{{ city }}</p>
       </div>
 
@@ -976,28 +979,28 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <p class="mt-4 text-xs text-surface-400">地图组件加载失败，以下为行程点列表</p>
+      <p class="mt-4 text-xs text-surface-400">{{ t('tripMap.loadFailedNote') }}</p>
     </div>
 
     <!-- Map Controls -->
     <div class="absolute right-3 top-3 z-10 flex flex-col gap-2">
       <button
         class="flex h-9 w-9 items-center justify-center rounded-lg bg-white/90 text-surface-600 shadow-card backdrop-blur-sm transition-all hover:bg-white hover:text-brand-600 hover:shadow-card-hover"
-        title="切换地图类型"
+        :title="t('tripMap.toggleType')"
         @click="toggleMapType"
       >
         <i :class="mapType === 'standard' ? 'ri-road-map-line' : 'ri-earth-line'" />
       </button>
       <button
         class="flex h-9 w-9 items-center justify-center rounded-lg bg-white/90 text-surface-600 shadow-card backdrop-blur-sm transition-all hover:bg-white hover:text-brand-600 hover:shadow-card-hover"
-        title="放大"
+        :title="t('tripMap.zoomIn')"
         @click="handleZoomIn"
       >
         <i class="ri-add-line text-lg" />
       </button>
       <button
         class="flex h-9 w-9 items-center justify-center rounded-lg bg-white/90 text-surface-600 shadow-card backdrop-blur-sm transition-all hover:bg-white hover:text-brand-600 hover:shadow-card-hover"
-        title="缩小"
+        :title="t('tripMap.zoomOut')"
         @click="handleZoomOut"
       >
         <i class="ri-subtract-line text-lg" />
@@ -1006,7 +1009,7 @@ onUnmounted(() => {
 
     <!-- Activity Type Legend -->
     <div class="absolute bottom-3 left-3 z-10 max-w-[46%] rounded-xl bg-white/92 px-3 py-2.5 shadow-card backdrop-blur-sm">
-      <p class="mb-1.5 text-[10px] font-semibold tracking-wider text-surface-400">地点类型</p>
+      <p class="mb-1.5 text-[10px] font-semibold tracking-wider text-surface-400">{{ t('tripMap.placeTypes') }}</p>
       <div class="flex flex-wrap gap-x-3 gap-y-1">
         <div v-for="item in typeLegend" :key="item.key" class="flex items-center gap-1.5">
           <span
@@ -1028,7 +1031,7 @@ onUnmounted(() => {
       <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span v-if="routeLoading" class="flex items-center gap-1 text-[10px] font-medium text-brand-600">
           <span class="inline-block h-2.5 w-2.5 animate-spin rounded-full border border-brand-200 border-t-brand-500" />
-          加载真实路线…
+          {{ t('tripMap.loadingRoutes') }}
         </span>
         <div v-for="item in modeLegend" :key="item.key" class="flex items-center gap-1.5">
           <span class="flex items-center">

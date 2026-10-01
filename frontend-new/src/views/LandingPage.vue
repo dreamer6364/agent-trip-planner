@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const authStore = useAuthStore()
 
 const statsVisible = ref(false)
@@ -53,8 +53,9 @@ function animateCounter(key: keyof typeof counters.value, target: number, durati
 }
 
 function formatNumber(n: number): string {
-  if (n >= 10000) {
-    return (n / 10000).toFixed(n >= 100000 ? 0 : 0) + '万'
+  const div = locale.value === 'zh-CN' ? 10000 : 1000
+  if (n >= div) {
+    return (n / div).toFixed(n >= div * 10 ? 0 : 0) + t('landing.bigUnit')
   }
   return n.toString()
 }
@@ -62,9 +63,10 @@ function formatNumber(n: number): string {
 function formatStat(key: string, value: number): string {
   if (key === 'cities') return value + '+'
   if (key === 'trips') {
-    if (value >= 10000) {
-      const wan = value / 10000
-      return (wan >= 10 ? Math.round(wan) : wan.toFixed(0)) + '万+'
+    const div = locale.value === 'zh-CN' ? 10000 : 1000
+    if (value >= div) {
+      const scaled = value / div
+      return (scaled >= 10 ? Math.round(scaled) : scaled.toFixed(0)) + t('landing.bigUnit') + '+'
     }
     return value + '+'
   }

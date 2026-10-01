@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { Activity } from '@/api/types'
 import { formatTimePoint, formatDurationText, TRANSPORT_LABELS } from '@/utils/activity'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   activity: Activity
@@ -23,56 +26,56 @@ const typeConfig = computed(() => {
   const configs: Record<string, { icon: string; label: string; color: string; bg: string; accentBar: string }> = {
     visit: {
       icon: 'M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z',
-      label: '景点',
+      label: t('activity.attraction'),
       color: 'text-blue-600 dark:text-blue-400',
       bg: 'bg-blue-50 dark:bg-blue-900/20',
       accentBar: 'bg-blue-500',
     },
     meal: {
       icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
-      label: '用餐',
+      label: t('activity.meal'),
       color: 'text-orange-600 dark:text-orange-400',
       bg: 'bg-orange-50 dark:bg-orange-900/20',
       accentBar: 'bg-orange-500',
     },
     transit: {
       icon: 'M8 17h.01M16 17h.01M3 11l1.5-5A2 2 0 016.4 4h11.2a2 2 0 011.9 1.4L21 11M3 11h18M3 11v6a1 1 0 001 1h1a1 1 0 001-1v-1h12v1a1 1 0 001 1h1a1 1 0 001-1v-6',
-      label: '交通',
+      label: t('activity.transit'),
       color: 'text-surface-600 dark:text-surface-400',
       bg: 'bg-surface-100 dark:bg-surface-700/50',
       accentBar: 'bg-surface-400',
     },
     museum: {
       icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4',
-      label: '博物馆',
+      label: t('activity.museumLabel'),
       color: 'text-purple-600 dark:text-purple-400',
       bg: 'bg-purple-50 dark:bg-purple-900/20',
       accentBar: 'bg-purple-500',
     },
     park: {
       icon: 'M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z',
-      label: '公园',
+      label: t('activity.park'),
       color: 'text-green-600 dark:text-green-400',
       bg: 'bg-green-50 dark:bg-green-900/20',
       accentBar: 'bg-green-500',
     },
     temple: {
       icon: 'M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z',
-      label: '寺庙',
+      label: t('activity.temple'),
       color: 'text-amber-600 dark:text-amber-400',
       bg: 'bg-amber-50 dark:bg-amber-900/20',
       accentBar: 'bg-amber-500',
     },
     shopping: {
       icon: 'M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z',
-      label: '购物',
+      label: t('activity.shopping'),
       color: 'text-pink-600 dark:text-pink-400',
       bg: 'bg-pink-50 dark:bg-pink-900/20',
       accentBar: 'bg-pink-500',
     },
     rest: {
       icon: 'M18 8h1a4 4 0 010 8h-1m-6-8v10m0-10v10M6 8H5a4 4 0 000 8h1m12-4a4 4 0 11-8 0 4 4 0 018 0z',
-      label: '休息',
+      label: t('activity.rest'),
       color: 'text-teal-600 dark:text-teal-400',
       bg: 'bg-teal-50 dark:bg-teal-900/20',
       accentBar: 'bg-teal-500',
@@ -83,9 +86,9 @@ const typeConfig = computed(() => {
 
 const priorityConfig = computed(() => {
   const configs: Record<string, { label: string; dotClass: string; textClass: string }> = {
-    must: { label: '必去', dotClass: 'bg-danger-500', textClass: 'text-danger-600 dark:text-danger-400' },
-    recommended: { label: '推荐', dotClass: 'bg-blue-500', textClass: 'text-blue-600 dark:text-blue-400' },
-    optional: { label: '可选', dotClass: 'bg-surface-400', textClass: 'text-surface-500 dark:text-surface-400' },
+    must: { label: t('activity.priority.must'), dotClass: 'bg-danger-500', textClass: 'text-danger-600 dark:text-danger-400' },
+    recommended: { label: t('activity.priority.recommended'), dotClass: 'bg-blue-500', textClass: 'text-blue-600 dark:text-blue-400' },
+    optional: { label: t('activity.priority.optional'), dotClass: 'bg-surface-400', textClass: 'text-surface-500 dark:text-surface-400' },
   }
   return configs[props.activity.priority] ?? configs.optional
 })
@@ -107,9 +110,10 @@ const transportHint = computed(() => {
   const label = TRANSPORT_LABELS[mode] || mode
   const km = Number(props.activity.travelDistanceKm ?? 0) || 0
   const dist = km > 0 ? ` · ${km < 10 ? km.toFixed(1) : Math.round(km)}km` : ''
-  return travel > 0
-    ? `至下一站 · ${label} ${formatDurationText(travel)}${dist}`
-    : `至下一站 · ${label}${dist}`
+  const info = travel > 0
+    ? `${label} ${formatDurationText(travel)}${dist}`
+    : `${label}${dist}`
+  return t('timeline.toNext', { info })
 })
 
 /** 评分/人均（餐厅推荐增强 v1.15.0） */
@@ -121,7 +125,7 @@ const metaBits = computed(() => {
   }
   const cost = String(props.activity.cost ?? '').trim()
   if (cost && cost !== '0' && cost !== '0.0') {
-    bits.push(cost.includes('¥') ? cost : `人均 ¥${cost}`)
+    bits.push(cost.includes('¥') ? cost : t('activity.perPerson', { cost }))
   }
   return bits
 })
@@ -144,7 +148,7 @@ function handleFocus() {
         ? 'border-brand-400 ring-2 ring-brand-500 ring-offset-2 ring-offset-surface-50 dark:ring-offset-surface-900'
         : 'border-surface-100 dark:border-surface-700 hover:border-brand-300 dark:hover:border-brand-500',
     ]"
-    title="点击在地图中定位"
+    :title="t('timeline.focusInMap')"
     @mouseenter="isHovered = true"
     @mouseleave="isHovered = false"
     @click="handleFocus"
@@ -231,7 +235,7 @@ function handleFocus() {
       <button
         type="button"
         class="flex h-7 w-7 items-center justify-center rounded-full bg-white text-brand-600 shadow-md ring-1 ring-brand-200 hover:bg-brand-500 hover:text-white transition-colors dark:bg-surface-700 dark:text-brand-300 dark:ring-surface-500 dark:hover:bg-brand-500 dark:hover:text-white"
-        title="在地图中查看"
+        :title="t('timeline.viewOnMap')"
         @click.stop="handleFocus"
       >
         <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -243,7 +247,7 @@ function handleFocus() {
         v-if="activity.activityType !== 'rest'"
         type="button"
         class="flex h-7 w-7 items-center justify-center rounded-full bg-brand-500 text-white shadow-glow hover:bg-brand-600 transition-colors animate-bounce-in"
-        title="交换位置"
+        :title="t('timeline.swapPosition')"
         @click.stop="handleSwap"
       >
         <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

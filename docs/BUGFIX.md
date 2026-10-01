@@ -11,6 +11,32 @@ TripForge 的所有 Bug 修复都会记录在此文件中。
 
 ---
 
+## [1.27.0] - 2026-10-01
+
+### 修复（语言切换按钮点击后界面语言不变）
+
+- **现象**：导航栏「中/EN」按钮点击后按钮文字会变，但整站文案始终中文；个人中心保存语言偏好刷新后也不生效
+- **根因**（三处断链叠加）：
+  1. `AppNavbar.toggleLanguage` 写入 `'zh'/'en'`，而 i18n 注册的 locale 码是 `'zh-CN'/'en-US'` —— 未注册码触发 `fallbackLocale: 'zh-CN'`，等于没切
+  2. 直接给 `useI18n()` 的 `locale` 赋值不落 localStorage，刷新即丢；`appStore.setLocale`（个人中心入口）只写 store + localStorage，**不回写 vue-i18n**，保存后界面同样不变
+  3. `document.documentElement.lang` 与 dayjs locale 从未随切换更新（dayjs 在 `main.ts` 写死 `zh-cn`，`NotificationItem` 内还有一处组件级重复设置）
+- **修复**：
+  - `i18n/index.ts` 新增 `applyLocale(lang)`：规范化语言码 → 同步 `i18n.global.locale` + `html lang` + `dayjs.locale` → 持久化 `tf_locale`；`normalizeLocale` 兼容历史 `'zh'/'en'`
+  - `AppNavbar.toggleLanguage` 与 `appStore.setLocale` 统一经 `applyLocale` 单入口；按钮显示态判断改为 `locale === 'zh-CN'`
+  - `main.ts` 启动时 `applyLocale(localStorage.getItem('tf_locale'))`，移除硬编码 `dayjs.locale('zh-cn')`；删除 `NotificationItem` 组件内 `dayjs.locale('zh-cn')`
+  - 按钮切换逻辑本身与全站文案迁移为 `t()` 一并完成（见 CHANGELOG 1.27.0）
+- 涉及文件：`frontend-new/src/i18n/index.ts`、`frontend-new/src/main.ts`、`frontend-new/src/stores/app.ts`、`frontend-new/src/components/layout/AppNavbar.vue`、`frontend-new/src/components/notification/NotificationItem.vue`
+
+### 验证方式与结果（2026-10-01）
+
+| 项 | 结果 |
+|---|---|
+| 切换链路代码走查 | 按钮/个人中心/启动三入口均汇入 `applyLocale`，语言码规范化后与注册码一致 ✓ |
+| 语言包键覆盖静态扫描 | 549 个静态 `t()` 键 0 缺失，zh/en 531 键结构对等 ✓ |
+| `npm run build` | vue-tsc + vite 构建通过 ✓ |
+| 服务端产物字节级抽查 | 网关下发 JS 同时包含 zh/en 词条 ✓ |
+| 部署 + 回归 | 6/6 UP；`node verify-rest.js` pass=23 fail=0 ✓ |
+
 ## [1.26.2] - 2026-09-30
 
 ### 修复（行程导出 JSON/PDF/ICS 三种格式均无法下载）

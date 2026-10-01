@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { Trip } from '@/api/types'
 import TripStatusBadge from './TripStatusBadge.vue'
 import UIModal from '@/components/ui/UIModal.vue'
@@ -20,6 +21,7 @@ const emit = defineEmits<{
 const tripStore = useTripStore()
 const authStore = useAuthStore()
 const toast = useToast()
+const { t, locale } = useI18n()
 
 const menuOpen = ref(false)
 const deleteOpen = ref(false)
@@ -84,8 +86,8 @@ const { coverUrl, coverLoaded, coverFailed } = useTripCover(coverKeyword)
 
 const dateRange = computed(() => {
   if (!props.trip.timeStart || !props.trip.timeEnd) return ''
-  const start = new Date(props.trip.timeStart).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
-  const end = new Date(props.trip.timeEnd).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
+  const start = new Date(props.trip.timeStart).toLocaleDateString(locale.value, { month: 'short', day: 'numeric' })
+  const end = new Date(props.trip.timeEnd).toLocaleDateString(locale.value, { month: 'short', day: 'numeric' })
   return `${start} - ${end}`
 })
 
@@ -116,12 +118,12 @@ async function confirmDelete() {
   deleting.value = true
   try {
     await tripStore.deleteTrip(props.trip.id)
-    toast.success('行程已删除')
+    toast.success(t('tripCard.deleted'))
     emit('deleted', props.trip.id)
     deleteOpen.value = false
     menuOpen.value = false
   } catch {
-    toast.error('删除失败，请重试')
+    toast.error(t('tripCard.deleteFailed'))
   } finally {
     deleting.value = false
   }
@@ -161,7 +163,7 @@ async function confirmDelete() {
         <div v-if="canDelete" class="relative" @click.stop>
           <button
             class="flex h-8 w-8 items-center justify-center rounded-full bg-white/20 text-white backdrop-blur-sm hover:bg-white/35 transition-colors"
-            aria-label="更多操作"
+            :aria-label="t('tripCard.moreActions')"
             @click="menuOpen = !menuOpen"
           >
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -187,7 +189,7 @@ async function confirmDelete() {
                 <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                 </svg>
-                删除行程
+                {{ t('trip.delete') }}
               </button>
             </div>
           </Transition>
@@ -241,22 +243,22 @@ async function confirmDelete() {
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
-          {{ activityCount }} 个活动
+          {{ activityCount }} {{ t('trip.activities') }}
         </span>
         <span class="inline-flex items-center px-2.5 py-1 rounded-lg bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-300 text-xs font-medium">
           <svg class="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
           </svg>
-          {{ dayCount }} 天
+          {{ dayCount }} {{ t('trip.days') }}
         </span>
       </div>
       <div
         v-if="authorId"
         class="mt-2.5 flex items-center gap-1.5 text-[11px] font-mono text-surface-400 dark:text-surface-500 break-all select-all"
-        title="作者 ID"
+        :title="t('tripCard.authorId')"
       >
         <i class="ri-user-3-line shrink-0 text-surface-400 dark:text-surface-500"></i>
-        <span>作者 {{ authorId }}</span>
+        <span>{{ t('tripCard.author', { id: authorId }) }}</span>
       </div>
     </div>
 
@@ -265,13 +267,13 @@ async function confirmDelete() {
 
     <UIModal
       :open="deleteOpen"
-      title="删除行程"
+      :title="t('trip.delete')"
       size="sm"
       @close="deleteOpen = false"
       @click="stopClick"
     >
       <p class="text-sm text-surface-600 dark:text-surface-300 leading-relaxed">
-        确定要删除「<span class="font-semibold text-surface-900 dark:text-white">{{ trip.title }}</span>」吗？此操作不可撤销。
+        {{ t('tripCard.deleteConfirmBefore') }}<span class="font-semibold text-surface-900 dark:text-white">{{ trip.title }}</span>{{ t('tripCard.deleteConfirmAfter') }}
       </p>
       <template #footer>
         <button
@@ -279,14 +281,14 @@ async function confirmDelete() {
           :disabled="deleting"
           @click="deleteOpen = false"
         >
-          取消
+          {{ t('common.cancel') }}
         </button>
         <button
           class="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-danger-500 hover:bg-danger-600 text-white font-semibold text-sm rounded-xl transition-all disabled:opacity-50"
           :disabled="deleting"
           @click="confirmDelete"
         >
-          {{ deleting ? '删除中...' : '确认删除' }}
+          {{ deleting ? t('tripCard.deleting') : t('tripCard.confirmDelete') }}
         </button>
       </template>
     </UIModal>

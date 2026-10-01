@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { Activity } from '@/api/types'
 import { effectiveTravelMinutes } from '@/utils/activity'
 import type { NavPoint } from '@/utils/navigation'
 import ActivityCard from './ActivityCard.vue'
 import TransitConnector from './TransitConnector.vue'
+
+const { t, locale } = useI18n()
 
 interface DayItem {
   dayNumber: number
@@ -29,7 +32,7 @@ const emit = defineEmits<{
 const formattedDate = computed(() => {
   if (!props.day.dateStr) return ''
   const date = new Date(props.day.dateStr)
-  return date.toLocaleDateString('zh-CN', {
+  return date.toLocaleDateString(locale.value, {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
@@ -100,7 +103,7 @@ function isActive(activity: Activity) {
           </div>
           <div>
             <h3 class="text-sm font-bold text-surface-900 dark:text-white">
-              第 {{ day.dayNumber }} 天
+              {{ t('timeline.day', { n: day.dayNumber }) }}
             </h3>
             <p class="text-xs text-surface-500 dark:text-surface-400">
               {{ formattedDate }}
@@ -108,7 +111,7 @@ function isActive(activity: Activity) {
           </div>
         </div>
         <span class="inline-flex items-center px-2.5 py-1 rounded-full bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 text-xs font-medium">
-          {{ activityCount }} 个活动
+          {{ activityCount }} {{ t('trip.activities') }}
         </span>
       </div>
     </div>

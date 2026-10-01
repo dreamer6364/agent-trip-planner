@@ -1,18 +1,20 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { tripApi } from '@/api/trip'
 import type { Trip } from '@/api/types'
 import TripCard from '@/components/trip/TripCard.vue'
 
 const router = useRouter()
+const { t } = useI18n()
 
 const trips = ref<Trip[]>([])
 const total = ref(0)
 const page = ref(1)
 const size = ref(9)
 const loading = ref(false)
-const error = ref('')
+const error = ref(false)
 const keyword = ref('')
 
 let debounceTimer: ReturnType<typeof setTimeout> | undefined
@@ -21,7 +23,7 @@ const totalPages = () => Math.max(1, Math.ceil(total.value / size.value))
 
 async function load() {
   loading.value = true
-  error.value = ''
+  error.value = false
   try {
     const kw = keyword.value.trim()
     const data = await tripApi.getPublicTrips({
@@ -32,7 +34,7 @@ async function load() {
     trips.value = data.items || []
     total.value = data.total || 0
   } catch {
-    error.value = '加载公开行程失败，请稍后重试'
+    error.value = true
     trips.value = []
   } finally {
     loading.value = false
@@ -72,11 +74,11 @@ onMounted(load)
   <div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-purple-50 dark:from-surface-900 dark:via-surface-900 dark:to-surface-800">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div class="mb-8">
-        <p class="text-sm font-medium text-accent-600 dark:text-accent-400 mb-1">社区灵感</p>
-        <h1 class="text-3xl sm:text-4xl font-bold text-surface-900 dark:text-white mb-2">公开行程</h1>
+        <p class="text-sm font-medium text-accent-600 dark:text-accent-400 mb-1">{{ t('explore.kicker') }}</p>
+        <h1 class="text-3xl sm:text-4xl font-bold text-surface-900 dark:text-white mb-2">{{ t('dashboard.publicTrips') }}</h1>
         <p class="text-surface-600 dark:text-surface-300">
-          浏览其他旅行者分享的完整行程
-          <span v-if="total > 0" class="text-surface-400"> · 共 {{ total }} 条</span>
+          {{ t('explore.subtitle') }}
+          <span v-if="total > 0" class="text-surface-400"> · {{ t('common.totalCount', { n: total }) }}</span>
         </p>
       </div>
 
@@ -90,7 +92,7 @@ onMounted(load)
           <input
             v-model="keyword"
             type="text"
-            placeholder="搜索地点、标题或描述..."
+            :placeholder="t('explore.searchPlaceholder')"
             class="w-full pl-10 pr-10 py-2.5 rounded-xl border border-surface-200 dark:border-surface-600 bg-white dark:bg-surface-800 text-surface-900 dark:text-white placeholder:text-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all"
             @input="onSearchInput"
             @keyup.enter="searchNow"
@@ -98,7 +100,7 @@ onMounted(load)
           <button
             v-if="keyword"
             class="absolute inset-y-0 right-0 pr-3.5 flex items-center"
-            aria-label="清除搜索"
+            :aria-label="t('explore.clearSearch')"
             @click="clearSearch"
           >
             <svg class="w-4 h-4 text-surface-400 hover:text-surface-600 dark:hover:text-surface-300 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -106,7 +108,7 @@ onMounted(load)
             </svg>
           </button>
         </div>
-        <p class="text-xs text-surface-400 dark:text-surface-500">支持搜索城市、景点、餐厅等地点名称</p>
+        <p class="text-xs text-surface-400 dark:text-surface-500">{{ t('explore.searchHint') }}</p>
       </div>
 
       <div v-if="loading" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -128,8 +130,8 @@ onMounted(load)
         v-else-if="error"
         class="rounded-3xl border border-warning-200 bg-warning-50 dark:border-warning-800 dark:bg-warning-900/20 px-6 py-10 text-center"
       >
-        <p class="text-warning-700 dark:text-warning-400 mb-4">{{ error }}</p>
-        <button class="btn-secondary text-sm" @click="load">重试</button>
+        <p class="text-warning-700 dark:text-warning-400 mb-4">{{ t('explore.loadError') }}</p>
+        <button class="btn-secondary text-sm" @click="load">{{ t('common.retry') }}</button>
       </div>
 
       <div v-else-if="trips.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -149,19 +151,19 @@ onMounted(load)
           <i class="ri-compass-3-line text-5xl text-accent-400"></i>
         </div>
         <template v-if="keyword.trim()">
-          <h3 class="text-xl font-semibold text-surface-700 dark:text-surface-200 mb-2">未找到与「{{ keyword.trim() }}」相关的行程</h3>
-          <p class="text-surface-500 dark:text-surface-400 mb-6 max-w-md">换个地点或关键词试试，例如城市、景点或餐厅名</p>
+          <h3 class="text-xl font-semibold text-surface-700 dark:text-surface-200 mb-2">{{ t('explore.noResultsTitle', { keyword: keyword.trim() }) }}</h3>
+          <p class="text-surface-500 dark:text-surface-400 mb-6 max-w-md">{{ t('explore.noResultsDesc') }}</p>
           <button class="btn-secondary" @click="clearSearch">
             <i class="ri-close-line" />
-            清除搜索
+            {{ t('explore.clearSearch') }}
           </button>
         </template>
         <template v-else>
-          <h3 class="text-xl font-semibold text-surface-700 dark:text-surface-200 mb-2">暂无公开行程</h3>
-          <p class="text-surface-500 dark:text-surface-400 mb-6 max-w-md">你可以在行程详情中开启公开分享，让更多人看到你的路线</p>
+          <h3 class="text-xl font-semibold text-surface-700 dark:text-surface-200 mb-2">{{ t('explore.emptyTitle') }}</h3>
+          <p class="text-surface-500 dark:text-surface-400 mb-6 max-w-md">{{ t('explore.emptyDesc') }}</p>
           <button class="btn-primary" @click="router.push('/dashboard')">
             <i class="ri-route-line" />
-            返回我的行程
+            {{ t('explore.backToMyTrips') }}
           </button>
         </template>
       </div>

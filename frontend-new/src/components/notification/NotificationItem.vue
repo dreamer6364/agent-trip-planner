@@ -3,10 +3,12 @@ import { computed } from 'vue'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 import 'dayjs/locale/zh-cn'
+import { useI18n } from 'vue-i18n'
 import type { Notification } from '@/api/types'
 
 dayjs.extend(relativeTime)
-dayjs.locale('zh-cn')
+
+const { t } = useI18n()
 
 interface Props {
   notification: Notification
@@ -59,11 +61,11 @@ const relativeTimeText = computed(() => {
   const now = dayjs()
   const diffMinutes = now.diff(time, 'minute')
 
-  if (diffMinutes < 1) return '刚刚'
-  if (diffMinutes < 60) return `${diffMinutes}分钟前`
-  if (diffMinutes < 1440) return `${Math.floor(diffMinutes / 60)}小时前`
-  if (diffMinutes < 10080) return `${Math.floor(diffMinutes / 1440)}天前`
-  return time.format('M月D日')
+  if (diffMinutes < 1) return t('notification.time.justNow')
+  if (diffMinutes < 60) return t('notification.time.minutesAgo', { n: diffMinutes })
+  if (diffMinutes < 1440) return t('notification.time.hoursAgo', { n: Math.floor(diffMinutes / 60) })
+  if (diffMinutes < 10080) return t('notification.time.daysAgo', { n: Math.floor(diffMinutes / 1440) })
+  return t('notification.time.dateShort', { m: time.month() + 1, d: time.date() })
 })
 
 function handleClick() {

@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { notificationApi } from '@/api/notification'
 import type { Notification } from '@/api/types'
+
+const { t } = useI18n()
 
 const unreadCount = ref(0)
 const panelOpen = ref(false)
@@ -67,12 +70,12 @@ function formatTime(dateStr: string): string {
   const diffMs = now.getTime() - date.getTime()
   const diffMin = Math.floor(diffMs / 60000)
 
-  if (diffMin < 1) return '刚刚'
-  if (diffMin < 60) return `${diffMin}分钟前`
+  if (diffMin < 1) return t('notificationBell.justNow')
+  if (diffMin < 60) return t('notificationBell.minutesAgo', { n: diffMin })
   const diffHr = Math.floor(diffMin / 60)
-  if (diffHr < 24) return `${diffHr}小时前`
+  if (diffHr < 24) return t('notificationBell.hoursAgo', { n: diffHr })
   const diffDay = Math.floor(diffHr / 24)
-  return `${diffDay}天前`
+  return t('notificationBell.daysAgo', { n: diffDay })
 }
 </script>
 
@@ -120,13 +123,13 @@ function formatTime(dateStr: string): string {
       >
         <!-- Header -->
         <div class="flex items-center justify-between border-b border-gray-100 px-4 py-3">
-          <h3 class="text-sm font-semibold text-gray-900">通知</h3>
+          <h3 class="text-sm font-semibold text-gray-900">{{ t('notification.title') }}</h3>
           <button
             v-if="unreadCount > 0"
             class="text-xs font-medium text-brand-600 hover:text-brand-700"
             @click="markAllRead"
           >
-            全部已读
+            {{ t('notification.markAllRead') }}
           </button>
         </div>
 
@@ -136,7 +139,7 @@ function formatTime(dateStr: string): string {
             <svg class="mx-auto h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
             </svg>
-            <p class="mt-2 text-sm text-gray-500">暂无通知</p>
+            <p class="mt-2 text-sm text-gray-500">{{ t('notification.empty') }}</p>
           </div>
 
           <button
@@ -166,7 +169,7 @@ function formatTime(dateStr: string): string {
             class="text-xs font-medium text-brand-600 hover:text-brand-700"
             @click="panelOpen = false"
           >
-            收起
+            {{ t('notificationBell.collapse') }}
           </button>
         </div>
       </div>

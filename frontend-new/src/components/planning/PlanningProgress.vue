@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, watch, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import StageIndicator from './StageIndicator.vue'
 
 interface Props {
@@ -19,6 +20,8 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   retry: []
 }>()
+
+const { t } = useI18n()
 
 const showConfetti = ref(false)
 
@@ -43,13 +46,13 @@ function normalizeStage(key: string): string {
 }
 
 const stages = computed(() => [
-  { key: 'PARSE_INPUT', label: '解析输入', icon: '📝' },
-  { key: 'GEOCODE', label: '地理编码', icon: '🌍' },
-  { key: 'BUILD_MODEL', label: '构建模型', icon: '🧩' },
-  { key: 'SOLVE', label: '求解优化', icon: '⚙️' },
-  { key: 'ROUTE', label: '路线规划', icon: '🗺️' },
-  { key: 'VERIFY_CITY', label: '归属验证', icon: '📍' },
-  { key: 'SAVE_RESULT', label: '保存结果', icon: '💾' },
+  { key: 'PARSE_INPUT', label: t('planning.stages.parse'), icon: '📝' },
+  { key: 'GEOCODE', label: t('planning.stages.geocode'), icon: '🌍' },
+  { key: 'BUILD_MODEL', label: t('planning.stages.model'), icon: '🧩' },
+  { key: 'SOLVE', label: t('planning.stages.solve'), icon: '⚙️' },
+  { key: 'ROUTE', label: t('planning.stages.route'), icon: '🗺️' },
+  { key: 'VERIFY_CITY', label: t('planning.stages.verifyCity'), icon: '📍' },
+  { key: 'SAVE_RESULT', label: t('planning.stages.persist'), icon: '💾' },
 ])
 
 const stageIndex = computed(() => {
@@ -57,20 +60,20 @@ const stageIndex = computed(() => {
   return idx >= 0 ? idx : 0
 })
 
-const stageDescriptions: Record<string, string> = {
-  PARSE_INPUT: '正在解析你的行程需求...',
-  GEOCODE: '正在获取地点坐标信息...',
-  BUILD_MODEL: '正在构建优化模型...',
-  SOLVE: '正在计算最优路线...',
-  ROUTE: '正在规划详细行程...',
-  VERIFY_CITY: '正在校验景点城市归属...',
-  SAVE_RESULT: '正在保存规划结果...',
-}
+const stageDescriptions = computed<Record<string, string>>(() => ({
+  PARSE_INPUT: t('planningProgress.descriptions.parseInput'),
+  GEOCODE: t('planningProgress.descriptions.geocode'),
+  BUILD_MODEL: t('planningProgress.descriptions.model'),
+  SOLVE: t('planningProgress.descriptions.solve'),
+  ROUTE: t('planningProgress.descriptions.route'),
+  VERIFY_CITY: t('planningProgress.descriptions.verifyCity'),
+  SAVE_RESULT: t('planningProgress.descriptions.saveResult'),
+}))
 
 const currentDescription = computed(() => {
-  if (props.status === 'completed') return '行程规划已成功完成！'
-  if (props.status === 'failed') return props.message || '规划过程中出现错误'
-  return stageDescriptions[normalizeStage(props.stage)] || '正在准备中...'
+  if (props.status === 'completed') return t('planningProgress.completedDesc')
+  if (props.status === 'failed') return props.message || t('planningProgress.failedFallback')
+  return stageDescriptions.value[normalizeStage(props.stage)] || t('planningProgress.preparing')
 })
 
 const stageStatuses = computed(() => {
@@ -169,9 +172,9 @@ watch(
               status === 'running' ? 'text-surface-900' : '',
             ]"
           >
-            <template v-if="status === 'completed'">规划完成</template>
-            <template v-else-if="status === 'failed'">规划失败</template>
-            <template v-else>AI 正在规划</template>
+            <template v-if="status === 'completed'">{{ t('planning.completed') }}</template>
+            <template v-else-if="status === 'failed'">{{ t('planning.failed') }}</template>
+            <template v-else>{{ t('planning.title') }}</template>
           </h2>
 
           <p class="text-surface-500 mb-8">{{ currentDescription }}</p>
@@ -251,7 +254,7 @@ watch(
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
-            重新规划
+            {{ t('planningProgress.replan') }}
           </button>
         </div>
       </div>

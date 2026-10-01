@@ -3,12 +3,14 @@ import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
+import { useAppStore } from '@/stores/app'
 import NotificationBell from './NotificationBell.vue'
 import UserAvatar from './UserAvatar.vue'
 import AppSidebar from './AppSidebar.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const appStore = useAppStore()
 const { t, locale } = useI18n()
 
 const mobileMenuOpen = ref(false)
@@ -32,7 +34,8 @@ function toggleDarkMode() {
 }
 
 function toggleLanguage() {
-  locale.value = locale.value === 'zh' ? 'en' : 'zh'
+  // 必须走 appStore：同步 vue-i18n、html lang、dayjs 并持久化
+  appStore.setLocale(locale.value === 'zh-CN' ? 'en-US' : 'zh-CN')
 }
 
 function handleLogout() {
@@ -84,7 +87,7 @@ function handleLogout() {
             class="flex h-9 w-9 items-center justify-center rounded-xl text-sm font-semibold text-gray-600 transition-all hover:bg-gray-100"
             @click="toggleLanguage"
           >
-            {{ locale === 'zh' ? '中' : 'EN' }}
+            {{ locale === 'zh-CN' ? '中' : 'EN' }}
           </button>
 
           <!-- Dark Mode Toggle -->

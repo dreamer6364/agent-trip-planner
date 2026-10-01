@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { Activity } from '@/api/types'
 import { getTypeTheme, priorityLabel, statusLabel } from '@/utils/mapTheme'
+
+const { t, locale } = useI18n()
 
 interface Props {
   activity: Activity | null
@@ -29,7 +32,7 @@ const timeRange = computed(() => {
       const m = String(iso).match(/^(\d{1,2}:\d{2})/)
       return m ? m[1] : String(iso)
     }
-    return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
+    return d.toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit', hour12: false })
   }
 
   return `${formatTime(start)} - ${formatTime(end)}`
@@ -38,10 +41,10 @@ const timeRange = computed(() => {
 const durationText = computed(() => {
   if (!props.activity?.durationMin) return ''
   const min = props.activity.durationMin
-  if (min < 60) return `${min} 分钟`
+  if (min < 60) return t('map.durationMinutes', { n: min })
   const h = Math.floor(min / 60)
   const m = min % 60
-  return m > 0 ? `${h} 小时 ${m} 分` : `${h} 小时`
+  return m > 0 ? t('map.durationHoursMinutes', { h, m }) : t('map.durationHours', { h })
 })
 
 const ratingText = computed(() => {
@@ -74,7 +77,7 @@ const costText = computed(() => {
           >
             <i :class="[currentType.icon, 'text-base']" :style="{ color: currentType.fill }" />
           </div>
-          <h3 class="text-sm font-semibold text-surface-900">活动详情</h3>
+          <h3 class="text-sm font-semibold text-surface-900">{{ t('map.details') }}</h3>
         </div>
         <button
           class="flex h-7 w-7 items-center justify-center rounded-lg text-surface-400 transition-colors hover:bg-surface-100 hover:text-surface-600"
@@ -117,7 +120,7 @@ const costText = computed(() => {
               <i class="ri-time-line text-brand-600" />
             </div>
             <div>
-              <p class="text-[10px] font-medium tracking-wider text-surface-400">时间安排</p>
+              <p class="text-[10px] font-medium tracking-wider text-surface-400">{{ t('map.schedule') }}</p>
               <p class="text-sm font-semibold text-surface-800">{{ timeRange }}</p>
             </div>
           </div>
@@ -130,7 +133,7 @@ const costText = computed(() => {
               <i class="ri-timer-line text-accent-600" />
             </div>
             <div>
-              <p class="text-[10px] font-medium tracking-wider text-surface-400">停留时长</p>
+              <p class="text-[10px] font-medium tracking-wider text-surface-400">{{ t('map.duration') }}</p>
               <p class="text-sm font-semibold text-surface-800">{{ durationText }}</p>
             </div>
           </div>
@@ -143,7 +146,7 @@ const costText = computed(() => {
               <i class="ri-flag-line text-warning-500" />
             </div>
             <div>
-              <p class="text-[10px] font-medium tracking-wider text-surface-400">优先级</p>
+              <p class="text-[10px] font-medium tracking-wider text-surface-400">{{ t('map.priority') }}</p>
               <p class="text-sm font-semibold text-surface-800">{{ priorityLabel(activity.priority) }}</p>
             </div>
           </div>
@@ -156,7 +159,7 @@ const costText = computed(() => {
               <i class="ri-check-double-line text-success-600" />
             </div>
             <div>
-              <p class="text-[10px] font-medium tracking-wider text-surface-400">状态</p>
+              <p class="text-[10px] font-medium tracking-wider text-surface-400">{{ t('map.status') }}</p>
               <p class="text-sm font-semibold text-surface-800">{{ statusLabel(activity.status) }}</p>
             </div>
           </div>
@@ -170,11 +173,11 @@ const costText = computed(() => {
             </div>
             <div class="flex min-w-0 gap-4">
               <div v-if="ratingText">
-                <p class="text-[10px] font-medium tracking-wider text-surface-400">评分</p>
+                <p class="text-[10px] font-medium tracking-wider text-surface-400">{{ t('map.rating') }}</p>
                 <p class="text-sm font-semibold text-surface-800">{{ ratingText }}</p>
               </div>
               <div v-if="costText">
-                <p class="text-[10px] font-medium tracking-wider text-surface-400">人均</p>
+                <p class="text-[10px] font-medium tracking-wider text-surface-400">{{ t('map.perPerson') }}</p>
                 <p class="text-sm font-semibold text-surface-800">{{ costText }}</p>
               </div>
             </div>
@@ -184,7 +187,7 @@ const costText = computed(() => {
             v-if="activity.notes"
             class="rounded-xl bg-surface-50 p-3"
           >
-            <p class="mb-1 text-[10px] font-medium tracking-wider text-surface-400">备注</p>
+            <p class="mb-1 text-[10px] font-medium tracking-wider text-surface-400">{{ t('map.notes') }}</p>
             <p class="text-sm leading-relaxed text-surface-600">{{ activity.notes }}</p>
           </div>
 
@@ -196,7 +199,7 @@ const costText = computed(() => {
               <i class="ri-map-pin-2-line text-danger-500" />
             </div>
             <div class="min-w-0">
-              <p class="text-[10px] font-medium tracking-wider text-surface-400">地址</p>
+              <p class="text-[10px] font-medium tracking-wider text-surface-400">{{ t('map.address') }}</p>
               <p class="break-all text-sm text-surface-600">{{ (activity as any).poiAddress }}</p>
             </div>
           </div>
@@ -210,7 +213,7 @@ const costText = computed(() => {
           @click="emit('focusTimeline')"
         >
           <i class="ri-list-check-2" />
-          在时间轴中查看
+          {{ t('map.viewInTimeline') }}
         </button>
       </div>
     </div>

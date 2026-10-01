@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import dayjs from 'dayjs'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
@@ -12,6 +13,7 @@ import UIButton from '@/components/ui/UIButton.vue'
 import UIInput from '@/components/ui/UIInput.vue'
 
 const router = useRouter()
+const { t } = useI18n()
 const authStore = useAuthStore()
 const appStore = useAppStore()
 const toast = useToast()
@@ -20,11 +22,11 @@ const activeTab = ref('profile')
 const profileLoading = ref(false)
 const passwordLoading = ref(false)
 
-const tabs = [
-  { key: 'profile', label: '个人信息' },
-  { key: 'preferences', label: '偏好设置' },
-  { key: 'security', label: '安全设置' },
-]
+const tabs = computed(() => [
+  { key: 'profile', label: t('profile.tabProfile') },
+  { key: 'preferences', label: t('profile.tabPreferences') },
+  { key: 'security', label: t('profile.tabSecurity') },
+])
 
 const profileForm = reactive({
   name: '',
@@ -50,13 +52,13 @@ const passwordErrors = reactive({
 
 const memberSince = computed(() => {
   if (!authStore.user?.createdAt) return '--'
-  return dayjs(authStore.user.createdAt).format('YYYY年M月D日')
+  return dayjs(authStore.user.createdAt).format(t('profile.dateFormat'))
 })
 
-const themeOptions = [
-  { value: 'light', label: '亮色模式' },
-  { value: 'dark', label: '暗色模式' },
-]
+const themeOptions = computed(() => [
+  { value: 'light', label: t('profile.themeLight') },
+  { value: 'dark', label: t('profile.themeDark') },
+])
 
 const localeOptions = [
   { value: 'zh-CN', label: '中文' },
@@ -81,7 +83,7 @@ function initPrefsForm() {
 
 async function saveProfile() {
   if (!profileForm.name.trim()) {
-    toast.error('请输入用户名')
+    toast.error(t('profile.nameRequired'))
     return
   }
   profileLoading.value = true
@@ -90,9 +92,9 @@ async function saveProfile() {
       name: profileForm.name.trim(),
       avatarUrl: profileForm.avatarUrl.trim() || undefined,
     })
-    toast.success('个人信息已保存')
+    toast.success(t('profile.saveProfileSuccess'))
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : '保存失败，请重试'
+    const message = err instanceof Error ? err.message : t('profile.saveFailed')
     toast.error(message)
   } finally {
     profileLoading.value = false
@@ -106,7 +108,7 @@ function savePreferences() {
   if (prefsForm.locale !== appStore.locale) {
     appStore.setLocale(prefsForm.locale)
   }
-  toast.success('偏好设置已保存')
+  toast.success(t('profile.savePrefsSuccess'))
 }
 
 function validatePassword(): boolean {
@@ -116,21 +118,21 @@ function validatePassword(): boolean {
   passwordErrors.confirm = ''
 
   if (!passwordForm.currentPassword) {
-    passwordErrors.current = '请输入当前密码'
+    passwordErrors.current = t('profile.currentPasswordRequired')
     valid = false
   }
   if (!passwordForm.newPassword) {
-    passwordErrors.new = '请输入新密码'
+    passwordErrors.new = t('profile.newPasswordRequired')
     valid = false
   } else if (passwordForm.newPassword.length < 8) {
-    passwordErrors.new = '密码长度至少8位'
+    passwordErrors.new = t('profile.passwordTooShort')
     valid = false
   }
   if (!passwordForm.confirmPassword) {
-    passwordErrors.confirm = '请确认新密码'
+    passwordErrors.confirm = t('profile.confirmNewPasswordRequired')
     valid = false
   } else if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-    passwordErrors.confirm = '两次输入的密码不一致'
+    passwordErrors.confirm = t('profile.passwordMismatch')
     valid = false
   }
   return valid
@@ -148,9 +150,9 @@ async function changePassword() {
     passwordForm.currentPassword = ''
     passwordForm.newPassword = ''
     passwordForm.confirmPassword = ''
-    toast.success('密码修改成功')
+    toast.success(t('profile.passwordChangeSuccess'))
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : '密码修改失败，请检查当前密码是否正确'
+    const message = err instanceof Error ? err.message : t('profile.passwordChangeFailed')
     toast.error(message)
   } finally {
     passwordLoading.value = false
@@ -177,25 +179,25 @@ onMounted(async () => {
         <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
         </svg>
-        返回
+        {{ t('common.back') }}
       </button>
 
       <!-- Profile Header -->
       <div class="bg-white rounded-2xl shadow-card p-6 sm:p-8 mb-8">
         <div class="flex flex-col sm:flex-row items-center gap-6">
           <UserAvatar
-            :name="authStore.user?.name || '用户'"
+            :name="authStore.user?.name || t('profile.userFallback')"
             size="lg"
           />
           <div class="text-center sm:text-left flex-1 min-w-0">
             <h1 class="text-2xl font-bold text-surface-900 truncate">
-              {{ authStore.user?.name || '用户' }}
+              {{ authStore.user?.name || t('profile.userFallback') }}
             </h1>
             <p class="text-sm text-surface-500 mt-1 truncate">
               {{ authStore.user?.email || '' }}
             </p>
             <p class="text-xs text-surface-400 mt-1">
-              注册于 {{ memberSince }}
+              {{ t('profile.memberSince', { date: memberSince }) }}
             </p>
           </div>
         </div>
@@ -212,14 +214,14 @@ onMounted(async () => {
           <div class="max-w-lg space-y-5">
             <UIInput
               v-model="profileForm.name"
-              label="用户名"
-              placeholder="请输入用户名"
+              :label="t('auth.name')"
+              :placeholder="t('profile.nameRequired')"
             />
             <UIInput
               v-model="profileForm.avatarUrl"
-              label="头像链接"
+              :label="t('profile.avatarLabel')"
               placeholder="https://example.com/avatar.jpg"
-              hint="输入图片URL设置自定义头像"
+              :hint="t('profile.avatarHint')"
             />
             <div class="pt-2">
               <UIButton
@@ -227,7 +229,7 @@ onMounted(async () => {
                 :loading="profileLoading"
                 @click="saveProfile"
               >
-                保存
+                {{ t('profile.save') }}
               </UIButton>
             </div>
           </div>
@@ -238,7 +240,7 @@ onMounted(async () => {
           <div class="max-w-lg space-y-6">
             <!-- Theme Toggle -->
             <div>
-              <label class="block text-sm font-medium text-surface-700 mb-3">主题模式</label>
+              <label class="block text-sm font-medium text-surface-700 mb-3">{{ t('profile.themeLabel') }}</label>
               <div class="flex gap-3">
                 <button
                   v-for="opt in themeOptions"
@@ -259,7 +261,7 @@ onMounted(async () => {
 
             <!-- Language -->
             <div>
-              <label class="block text-sm font-medium text-surface-700 mb-3">语言</label>
+              <label class="block text-sm font-medium text-surface-700 mb-3">{{ t('profile.language') }}</label>
               <div class="flex gap-3">
                 <button
                   v-for="opt in localeOptions"
@@ -282,7 +284,7 @@ onMounted(async () => {
                 variant="primary"
                 @click="savePreferences"
               >
-                保存偏好
+                {{ t('profile.savePrefs') }}
               </UIButton>
             </div>
           </div>
@@ -293,27 +295,27 @@ onMounted(async () => {
           <div class="max-w-lg space-y-6">
             <!-- Change Password -->
             <div>
-              <h3 class="text-base font-semibold text-surface-900 mb-4">修改密码</h3>
+              <h3 class="text-base font-semibold text-surface-900 mb-4">{{ t('profile.changePassword') }}</h3>
               <div class="space-y-4">
                 <UIInput
                   v-model="passwordForm.currentPassword"
-                  label="当前密码"
+                  :label="t('profile.currentPassword')"
                   type="password"
-                  placeholder="请输入当前密码"
+                  :placeholder="t('profile.currentPasswordRequired')"
                   :error="passwordErrors.current"
                 />
                 <UIInput
                   v-model="passwordForm.newPassword"
-                  label="新密码"
+                  :label="t('profile.newPassword')"
                   type="password"
-                  placeholder="请输入新密码（至少8位）"
+                  :placeholder="t('profile.newPasswordPlaceholder')"
                   :error="passwordErrors.new"
                 />
                 <UIInput
                   v-model="passwordForm.confirmPassword"
-                  label="确认新密码"
+                  :label="t('profile.confirmNewPassword')"
                   type="password"
-                  placeholder="请再次输入新密码"
+                  :placeholder="t('profile.confirmPasswordPlaceholder')"
                   :error="passwordErrors.confirm"
                 />
                 <div class="pt-1">
@@ -322,7 +324,7 @@ onMounted(async () => {
                     :loading="passwordLoading"
                     @click="changePassword"
                   >
-                    修改密码
+                    {{ t('profile.changePassword') }}
                   </UIButton>
                 </div>
               </div>

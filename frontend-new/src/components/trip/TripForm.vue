@@ -45,13 +45,13 @@ const paceOptions = computed(() => [
   { value: 'relaxed', label: t('tripCreate.pace.relaxed'), hours: t('tripCreate.pace.relaxedHours'), visits: t('tripCreate.pace.relaxedVisits'), icon: 'M4 6h16M4 12h16M4 18h7' },
 ])
 
-const transportModes = [
-  { value: 'mixed', label: '混合', icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' },
-  { value: 'walk', label: '步行', icon: 'M13 7a2 2 0 100-4 2 2 0 000 4zm-3 4l-2 6h3l1-4 2 2v4h2v-5l-2-2 1-3h-2l-1 1-1-3h2l1 2z' },
-  { value: 'transit', label: '公交', icon: 'M8 17h.01M16 17h.01M3 11l1.5-5A2 2 0 016.4 4h11.2a2 2 0 011.9 1.4L21 11M3 11h18M3 11v6a1 1 0 001 1h1a1 1 0 001-1v-1h12v1a1 1 0 001 1h1a1 1 0 001-1v-6' },
-  { value: 'drive', label: '自驾', icon: 'M9 17a1 1 0 100-2 1 1 0 000 2zm6 0a1 1 0 100-2 1 1 0 000 2zM5 17H3v-4l2-5h10l2 5v4h-2m-10 0h10M5 8V6a1 1 0 011-1h8a1 1 0 011 1v2' },
-  { value: 'bike', label: '骑行', icon: 'M5 17h2m10 0h2M7 17a3 3 0 110-6 3 3 0 010 6zm10 0a3 3 0 110-6 3 3 0 010 6zM5 11l3-6h4l2 6' },
-]
+const transportModes = computed(() => [
+  { value: 'mixed', label: t('trip.mixed'), icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' },
+  { value: 'walk', label: t('trip.walk'), icon: 'M13 7a2 2 0 100-4 2 2 0 000 4zm-3 4l-2 6h3l1-4 2 2v4h2v-5l-2-2 1-3h-2l-1 1-1-3h2l1 2z' },
+  { value: 'transit', label: t('trip.transit'), icon: 'M8 17h.01M16 17h.01M3 11l1.5-5A2 2 0 016.4 4h11.2a2 2 0 011.9 1.4L21 11M3 11h18M3 11v6a1 1 0 001 1h1a1 1 0 001-1v-1h12v1a1 1 0 001 1h1a1 1 0 001-1v-6' },
+  { value: 'drive', label: t('trip.drive'), icon: 'M9 17a1 1 0 100-2 1 1 0 000 2zm6 0a1 1 0 100-2 1 1 0 000 2zM5 17H3v-4l2-5h10l2 5v4h-2m-10 0h10M5 8V6a1 1 0 011-1h8a1 1 0 011 1v2' },
+  { value: 'bike', label: t('trip.bike'), icon: 'M5 17h2m10 0h2M7 17a3 3 0 110-6 3 3 0 010 6zm10 0a3 3 0 110-6 3 3 0 010 6zM5 11l3-6h4l2 6' },
+])
 
 watch(() => props.initialData, (val) => {
   if (val) {
@@ -62,7 +62,7 @@ watch(() => props.initialData, (val) => {
 function handleSubmit() {
   if (!form.rawInput.trim() || !form.timeStart || !form.timeEnd) return
   const payload: CreateTripRequest = {
-    title: form.title || 'AI 行程规划',
+    title: form.title || t('tripForm.defaultTitle'),
     rawInput: form.rawInput,
     timeStart: form.timeStart,
     timeEnd: form.timeEnd,
@@ -94,7 +94,7 @@ function setTomorrow() {
   <form @submit.prevent="handleSubmit" class="space-y-6">
     <div class="space-y-2">
       <label class="block text-sm font-semibold text-surface-700 dark:text-surface-300">
-        AI 行程描述
+        {{ t('tripForm.descriptionLabel') }}
       </label>
       <div class="relative">
         <div
@@ -106,7 +106,7 @@ function setTomorrow() {
         <textarea
           v-model="form.rawInput"
           rows="4"
-          placeholder="例如：我想去北京玩3天，主要想去故宫、长城、颐和园，喜欢吃烤鸭..."
+          :placeholder="t('tripForm.descriptionPlaceholder')"
           class="relative w-full rounded-xl border border-surface-200 dark:border-surface-600 bg-white dark:bg-surface-800 px-4 py-3 text-surface-900 dark:text-white placeholder:text-surface-400 focus:outline-none focus:ring-0 resize-none transition-colors duration-200"
           @focus="isInputFocused = true"
           @blur="isInputFocused = false"
@@ -115,14 +115,14 @@ function setTomorrow() {
           <svg class="w-4 h-4 text-brand-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
           </svg>
-          <span>AI 智能解析</span>
+          <span>{{ t('tripForm.aiParse') }}</span>
         </div>
       </div>
     </div>
 
     <div class="space-y-2">
       <label class="block text-sm font-semibold text-surface-700 dark:text-surface-300">
-        交通方式
+        {{ t('trip.transportMode') }}
       </label>
       <div class="grid grid-cols-5 gap-2">
         <button
@@ -178,7 +178,7 @@ function setTomorrow() {
     <div class="grid grid-cols-2 gap-4">
       <div class="space-y-2">
         <label class="block text-sm font-semibold text-surface-700 dark:text-surface-300">
-          开始时间
+          {{ t('tripForm.startTime') }}
         </label>
         <input
           v-model="form.timeStart"
@@ -188,7 +188,7 @@ function setTomorrow() {
       </div>
       <div class="space-y-2">
         <label class="block text-sm font-semibold text-surface-700 dark:text-surface-300">
-          结束时间
+          {{ t('tripForm.endTime') }}
         </label>
         <input
           v-model="form.timeEnd"
@@ -201,12 +201,12 @@ function setTomorrow() {
     <div class="grid grid-cols-2 gap-4">
       <div class="space-y-2">
         <label class="block text-sm font-semibold text-surface-700 dark:text-surface-300">
-          行程标题
+          {{ t('trip.title') }}
         </label>
         <input
           v-model="form.title"
           type="text"
-          placeholder="为你的行程起个名字（可选）"
+          :placeholder="t('tripForm.titlePlaceholder')"
           class="w-full rounded-xl border border-surface-200 dark:border-surface-600 bg-white dark:bg-surface-800 px-4 py-2.5 text-surface-900 dark:text-white placeholder:text-surface-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all"
         />
       </div>
@@ -238,13 +238,13 @@ function setTomorrow() {
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
           <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
         </svg>
-        <span class="ml-2">AI 规划中...</span>
+        <span class="ml-2">{{ t('tripForm.planning') }}</span>
       </span>
       <span v-else class="flex items-center justify-center gap-2">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
         </svg>
-        开始智能规划
+        {{ t('tripForm.startPlan') }}
       </span>
     </button>
   </form>

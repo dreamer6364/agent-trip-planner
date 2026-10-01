@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import UIModal from '@/components/ui/UIModal.vue'
 import UIButton from '@/components/ui/UIButton.vue'
 import UIInput from '@/components/ui/UIInput.vue'
@@ -17,6 +18,8 @@ const emit = defineEmits<{
   close: []
 }>()
 
+const { t, locale } = useI18n()
+
 const isPublic = ref(true)
 const password = ref('')
 const expireDays = ref<number | null>(7)
@@ -26,15 +29,20 @@ const copying = ref(false)
 const copied = ref(false)
 const error = ref('')
 
-const expireOptions = [
-  { value: 7, label: '7 天' },
-  { value: 30, label: '30 天' },
-  { value: null, label: '永不过期' },
-]
+const expireOptions = computed(() => [
+  { value: 7, label: t('share.days', { n: 7 }) },
+  { value: 30, label: t('share.days', { n: 30 }) },
+  { value: null, label: t('share.never') },
+])
 
 const shareLink = computed(() => {
   if (shareInfo.value) return shareInfo.value.shareUrl
   return ''
+})
+
+const expiresText = computed(() => {
+  const iso = shareInfo.value?.expiresAt
+  return iso ? new Date(iso).toLocaleDateString(locale.value) : ''
 })
 
 watch(
@@ -70,7 +78,7 @@ async function handleCreateShare() {
     })
     shareInfo.value = result
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : '创建分享失败'
+    error.value = e instanceof Error ? e.message : t('shareDialog.createFailed')
   } finally {
     loading.value = false
   }
@@ -86,7 +94,7 @@ async function handleRevoke() {
     password.value = ''
     expireDays.value = 7
   } catch (e: unknown) {
-    error.value = '撤销分享失败'
+    error.value = t('shareDialog.revokeFailed')
   } finally {
     loading.value = false
   }
@@ -119,7 +127,7 @@ async function handleCopy() {
 <template>
   <UIModal
     :open="open"
-    title="分享行程"
+    :title="t('share.title')"
     size="md"
     @close="emit('close')"
   >
@@ -140,8 +148,8 @@ async function handleCopy() {
               </svg>
             </div>
             <div>
-              <p class="text-sm font-medium text-surface-900">公开访问</p>
-              <p class="text-xs text-surface-500">{{ isPublic ? '任何人可通过链接查看' : '仅授权用户可查看' }}</p>
+              <p class="text-sm font-medium text-surface-900">{{ t('shareDialog.publicAccess') }}</p>
+              <p class="text-xs text-surface-500">{{ isPublic ? t('shareDialog.anyoneWithLink') : t('shareDialog.authorizedOnly') }}</p>
             </div>
           </div>
           <button
@@ -163,13 +171,13 @@ async function handleCopy() {
 
         <UIInput
           v-model="password"
-          label="密码保护（可选）"
-          placeholder="设置访问密码"
+          :label="t('shareDialog.passwordLabel')"
+          :placeholder="t('shareDialog.passwordPlaceholder')"
           type="password"
         />
 
         <div>
-          <label class="mb-1.5 block text-sm font-medium text-surface-700">链接有效期</label>
+          <label class="mb-1.5 block text-sm font-medium text-surface-700">{{ t('shareDialog.expireLabel') }}</label>
           <div class="flex gap-2">
             <button
               v-for="opt in expireOptions"
@@ -191,7 +199,7 @@ async function handleCopy() {
           v-if="shareInfo"
           class="rounded-xl border border-success-200 bg-success-50 p-4"
         >
-          <p class="text-xs font-medium text-success-700 mb-2">分享链接</p>
+          <p class="text-xs font-medium text-success-700 mb-2">{{ t('shareDialog.linkLabel') }}</p>
           <div class="flex items-center gap-2">
             <div class="flex-1 min-w-0 rounded-lg bg-white px-3 py-2 border border-success-200">
               <p class="text-sm text-surface-900 truncate font-mono">{{ shareLink }}</p>
@@ -211,11 +219,11 @@ async function handleCopy() {
               <svg v-else class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
               </svg>
-              {{ copied ? '已复制' : '复制' }}
+              {{ copied ? t('shareDialog.copied') : t('shareDialog.copy') }}
             </button>
           </div>
           <p v-if="shareInfo.expiresAt" class="mt-2 text-xs text-success-600">
-            过期时间：{{ new Date(shareInfo.expiresAt).toLocaleDateString('zh-CN') }}
+            {{ t('shareDialog.expiresAt', { date: expiresText }) }}
           </p>
         </div>
 
@@ -231,18 +239,18 @@ async function handleCopy() {
     <template #footer>
       <template v-if="shareInfo">
         <UIButton variant="danger" size="sm" :loading="loading" @click="handleRevoke">
-          撤销分享
+          {{ t('share.revoke') }}
         </UIButton>
         <UIButton variant="primary" size="sm" @click="emit('close')">
-          完成
+          {{ t('shareDialog.done') }}
         </UIButton>
       </template>
       <template v-else>
         <UIButton variant="secondary" size="sm" @click="emit('close')">
-          取消
+          {{ t('common.cancel') }}
         </UIButton>
         <UIButton variant="primary" size="sm" :loading="loading" @click="handleCreateShare">
-          生成分享链接
+          {{ t('shareDialog.createLink') }}
         </UIButton>
       </template>
     </template>

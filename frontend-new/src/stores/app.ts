@@ -1,9 +1,10 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { applyLocale, normalizeLocale } from '@/i18n'
 
 export const useAppStore = defineStore('app', () => {
   const darkMode = ref(false)
-  const locale = ref(localStorage.getItem('tf_locale') || 'zh-CN')
+  const locale = ref(normalizeLocale(localStorage.getItem('tf_locale')))
   const sidebarOpen = ref(false)
   const loading = ref(false)
 
@@ -36,8 +37,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function setLocale(lang: string) {
-    locale.value = lang
-    localStorage.setItem('tf_locale', lang)
+    locale.value = applyLocale(lang)
   }
 
   function toggleSidebar() {

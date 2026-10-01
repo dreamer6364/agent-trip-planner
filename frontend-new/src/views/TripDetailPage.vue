@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useTripStore } from '@/stores/trip'
 import { useToast } from '@/composables/useToast'
 import { tripApi } from '@/api/trip'
@@ -23,6 +24,7 @@ const route = useRoute()
 const router = useRouter()
 const tripStore = useTripStore()
 const toast = useToast()
+const { t } = useI18n()
 
 const tripId = computed(() => route.params.id as string)
 
@@ -147,29 +149,32 @@ const versionOptions = computed(() =>
   versions.value.map((v) => {
     const date = new Date(v.createdAt).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
     const count = normalizeActivities(v.activities).length
-    const current = v.id === currentVersion.value?.id ? ' (当前)' : ''
-    return { value: v.id, label: `版本 ${v.versionNum} · ${date} · ${count}项${current}` }
+    const current = v.id === currentVersion.value?.id ? t('tripDetail.versionCurrent') : ''
+    return {
+      value: v.id,
+      label: t('tripDetail.versionOption', { version: v.versionNum, date, count, current }),
+    }
   })
 )
 
 const moreMenuItems = computed(() => [
   {
-    label: '重新规划',
+    label: t('tripDetail.replan'),
     icon: '🤖',
     action: () => navigateToPlanning(true),
   },
   {
-    label: '复制行程',
+    label: t('tripDetail.duplicate'),
     icon: '📋',
     action: handleDuplicate,
   },
   {
-    label: '归档行程',
+    label: t('tripDetail.archive'),
     icon: '📦',
     action: handleArchive,
   },
   {
-    label: '删除行程',
+    label: t('trip.delete'),
     icon: '🗑️',
     danger: true,
     action: () => { deleteConfirmOpen.value = true; showMoreMenu.value = false },
@@ -253,9 +258,9 @@ async function saveTitle() {
   }
   try {
     await tripStore.updateTrip(tripId.value, { title: newTitle })
-    toast.success('标题已更新')
+    toast.success(t('tripDetail.titleUpdated'))
   } catch {
-    toast.error('更新标题失败')
+    toast.error(t('tripDetail.titleUpdateFailed'))
   }
   isEditingTitle.value = false
 }
@@ -267,17 +272,17 @@ async function handleExport() {
 async function handleDuplicate() {
   try {
     const newTrip = await tripApi.create({
-      title: `${trip.value?.title || '行程'} - 副本`,
+      title: t('tripDetail.duplicateTitle', { title: trip.value?.title || t('tripDetail.untitled') }),
       rawInput: trip.value?.rawInput || '',
       timeStart: trip.value?.timeStart || '',
       timeEnd: trip.value?.timeEnd || '',
       transportMode: trip.value?.transportMode,
       pace: trip.value?.pace || 'moderate',
     })
-    toast.success('行程已复制')
+    toast.success(t('tripDetail.duplicated'))
     router.push(`/trips/${newTrip.id}`)
   } catch {
-    toast.error('复制行程失败')
+    toast.error(t('tripDetail.duplicateFailed'))
   }
   showMoreMenu.value = false
 }
@@ -285,9 +290,9 @@ async function handleDuplicate() {
 async function handleArchive() {
   try {
     await tripStore.updateTrip(tripId.value, { status: 'archived' })
-    toast.success('行程已归档')
+    toast.success(t('tripDetail.archived'))
   } catch {
-    toast.error('归档失败')
+    toast.error(t('tripDetail.archiveFailed'))
   }
   showMoreMenu.value = false
 }
@@ -295,10 +300,10 @@ async function handleArchive() {
 async function handleDelete() {
   try {
     await tripStore.deleteTrip(tripId.value)
-    toast.success('行程已删除')
+    toast.success(t('tripDetail.deleted'))
     router.push('/dashboard')
   } catch {
-    toast.error('删除失败')
+    toast.error(t('tripDetail.deleteFailed'))
   }
   deleteConfirmOpen.value = false
 }
@@ -313,7 +318,7 @@ function handleSwapResult(_alternative: ActivityAlternative) {
   swapActivity.value = null
   tripStore.fetchTrip(tripId.value)
   loadVersions()
-  toast.success('活动替换成功')
+  toast.success(t('tripDetail.swapSuccess'))
 }
 
 function handleSwapClose() {
@@ -361,7 +366,7 @@ function handleDrop(fromIndex: number, toIndex: number, dayNumber: number) {
 
   dragFromIndex.value = null
   dragDayNumber.value = null
-  toast.info('活动顺序已调整')
+  toast.info(t('tripDetail.reorderSuccess'))
 }
 
 function navigateBack() {
@@ -402,7 +407,7 @@ onUnmounted(() => {
       <!-- Back Button -->
       <button
         class="flex h-9 w-9 items-center justify-center rounded-xl text-surface-500 transition-colors hover:bg-surface-100 hover:text-surface-700 dark:text-surface-400 dark:hover:bg-surface-700"
-        title="返回"
+        :title="t('common.back')"
         @click="navigateBack"
       >
         <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -426,10 +431,10 @@ onUnmounted(() => {
         <template v-else>
           <h1
             class="max-w-[200px] truncate text-sm font-bold text-surface-900 hover:text-brand-600 sm:max-w-none sm:text-base dark:text-white dark:hover:text-brand-400 cursor-pointer"
-            title="点击编辑标题"
+            :title="t('tripDetail.editTitleHint')"
             @click="startEditTitle"
           >
-            {{ trip?.title || '加载中...' }}
+            {{ trip?.title || t('common.loading') }}
           </h1>
         </template>
         <TripStatusBadge v-if="trip" :status="trip.status" />
@@ -440,7 +445,7 @@ onUnmounted(() => {
         <!-- Share Button -->
         <button
           class="hidden h-9 w-9 items-center justify-center rounded-xl text-surface-500 transition-colors hover:bg-surface-100 hover:text-brand-600 dark:text-surface-400 dark:hover:bg-surface-700 sm:flex"
-          title="分享"
+          :title="t('trip.share')"
           @click="showShareDialog = true"
         >
           <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -451,7 +456,7 @@ onUnmounted(() => {
         <!-- Export Button -->
         <button
           class="hidden h-9 w-9 items-center justify-center rounded-xl text-surface-500 transition-colors hover:bg-surface-100 hover:text-brand-600 dark:text-surface-400 dark:hover:bg-surface-700 sm:flex"
-          title="导出"
+          :title="t('trip.export')"
           @click="handleExport"
         >
           <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -464,7 +469,7 @@ onUnmounted(() => {
           <template #trigger>
             <button
               class="flex h-9 w-9 items-center justify-center rounded-xl text-surface-500 transition-colors hover:bg-surface-100 hover:text-surface-700 dark:text-surface-400 dark:hover:bg-surface-700"
-              title="更多操作"
+              :title="t('tripDetail.moreActions')"
             >
               <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
@@ -481,9 +486,9 @@ onUnmounted(() => {
       <div class="flex rounded-xl bg-surface-100 p-1 dark:bg-surface-700">
         <button
           v-for="tab in [
-            { key: 'timeline' as const, label: '时间轴' },
-            { key: 'map' as const, label: '地图' },
-            { key: 'compare' as const, label: '对比' },
+            { key: 'timeline' as const, label: t('tripDetail.tabTimeline') },
+            { key: 'map' as const, label: t('tripDetail.tabMap') },
+            { key: 'compare' as const, label: t('tripDetail.tabCompare') },
           ]"
           :key="tab.key"
           :class="[
@@ -517,13 +522,13 @@ onUnmounted(() => {
 
         <button
           class="inline-flex items-center gap-1.5 rounded-lg bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-600 transition-colors hover:bg-brand-100 dark:bg-brand-900/30 dark:text-brand-400 dark:hover:bg-brand-900/50"
-          title="换版规划：主题不变，生成内容不同的新路线"
+          :title="t('tripDetail.variantHint')"
           @click="createVariantVersion"
         >
           <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
           </svg>
-          <span class="hidden sm:inline">创建新版本</span>
+          <span class="hidden sm:inline">{{ t('tripDetail.createVersion') }}</span>
         </button>
       </div>
     </div>
@@ -547,9 +552,9 @@ onUnmounted(() => {
                 <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
               </svg>
             </div>
-            <h3 class="mb-1 text-lg font-semibold text-surface-700 dark:text-surface-300">暂无行程数据</h3>
-            <p class="mb-4 text-sm text-surface-500 dark:text-surface-400">此版本还没有规划活动</p>
-            <button class="btn-primary" @click="navigateToPlanning">开始规划</button>
+            <h3 class="mb-1 text-lg font-semibold text-surface-700 dark:text-surface-300">{{ t('tripDetail.emptyTitle') }}</h3>
+            <p class="mb-4 text-sm text-surface-500 dark:text-surface-400">{{ t('tripDetail.emptyDesc') }}</p>
+            <button class="btn-primary" @click="navigateToPlanning">{{ t('landing.hero.cta') }}</button>
           </div>
 
           <template v-else>
@@ -660,8 +665,8 @@ onUnmounted(() => {
         <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
         </svg>
-        <span class="hidden sm:inline">添加活动</span>
-        <span class="sm:hidden">添加</span>
+        <span class="hidden sm:inline">{{ t('tripDetail.addActivity') }}</span>
+        <span class="sm:hidden">{{ t('tripDetail.addShort') }}</span>
       </button>
     </div>
 
@@ -703,20 +708,20 @@ onUnmounted(() => {
                 <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
               </svg>
             </div>
-            <h3 class="mb-2 text-lg font-bold text-surface-900 dark:text-white">确认删除</h3>
-            <p class="mb-6 text-sm text-surface-500 dark:text-surface-400">此操作不可撤销，确定要删除这个行程吗？</p>
+            <h3 class="mb-2 text-lg font-bold text-surface-900 dark:text-white">{{ t('tripDetail.confirmDelete') }}</h3>
+            <p class="mb-6 text-sm text-surface-500 dark:text-surface-400">{{ t('tripDetail.deleteConfirmText') }}</p>
             <div class="flex justify-end gap-3">
               <button
                 class="rounded-xl border border-surface-200 bg-white px-4 py-2 text-sm font-medium text-surface-700 transition-colors hover:bg-surface-50 dark:border-surface-600 dark:bg-surface-700 dark:text-surface-300"
                 @click="deleteConfirmOpen = false"
               >
-                取消
+                {{ t('common.cancel') }}
               </button>
               <button
                 class="rounded-xl bg-danger-500 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-danger-500/25 transition-all hover:bg-danger-600"
                 @click="handleDelete"
               >
-                确认删除
+                {{ t('tripDetail.confirmDelete') }}
               </button>
             </div>
           </div>

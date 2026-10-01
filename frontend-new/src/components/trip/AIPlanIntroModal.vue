@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import UIModal from '@/components/ui/UIModal.vue'
+
+const { t } = useI18n()
 
 interface Props {
   open: boolean
@@ -16,12 +19,12 @@ const emit = defineEmits<{
   confirm: []
 }>()
 
-const stages = [
-  { title: '解析需求', desc: '提取城市、天数与旅行偏好', icon: 'ri-brain-line' },
-  { title: '智能选点', desc: '筛选景点与餐厅，安排每日节奏', icon: 'ri-map-pin-2-line' },
-  { title: '路线规划', desc: '基于高德地图计算真实交通距离与时长', icon: 'ri-route-line' },
-  { title: '生成行程', desc: '输出完整行程与每日路线', icon: 'ri-file-text-line' },
-]
+const stages = computed(() => [
+  { title: t('aiIntro.stages.parse.title'), desc: t('aiIntro.stages.parse.desc'), icon: 'ri-brain-line' },
+  { title: t('aiIntro.stages.select.title'), desc: t('aiIntro.stages.select.desc'), icon: 'ri-map-pin-2-line' },
+  { title: t('aiIntro.stages.route.title'), desc: t('aiIntro.stages.route.desc'), icon: 'ri-route-line' },
+  { title: t('aiIntro.stages.generate.title'), desc: t('aiIntro.stages.generate.desc'), icon: 'ri-file-text-line' },
+])
 
 const stageIdx = ref(0)
 const elapsed = ref(0)
@@ -47,7 +50,7 @@ watch(
       stageIdx.value = 0
       elapsed.value = 0
       stageTimer = window.setInterval(() => {
-        if (stageIdx.value < stages.length - 1) stageIdx.value++
+        if (stageIdx.value < stages.value.length - 1) stageIdx.value++
       }, 8000)
       elapsedTimer = window.setInterval(() => {
         elapsed.value++
@@ -63,8 +66,8 @@ onUnmounted(stopTimers)
 
 const elapsedText = computed(() => {
   const s = elapsed.value
-  if (s < 60) return `已用时 ${s} 秒`
-  return `已用时 ${Math.floor(s / 60)} 分 ${s % 60} 秒`
+  if (s < 60) return t('aiIntro.elapsedSeconds', { n: s })
+  return t('aiIntro.elapsedMinutes', { m: Math.floor(s / 60), n: s % 60 })
 })
 
 function handleClose() {
@@ -84,10 +87,10 @@ function handleClose() {
         </div>
         <div>
           <h3 class="text-lg font-semibold text-surface-900 dark:text-white">
-            {{ loading ? 'AI 正在规划你的行程' : '开始 AI 智能规划？' }}
+            {{ loading ? t('aiIntro.planningTitle') : t('aiIntro.confirmTitle') }}
           </h3>
           <p class="text-xs text-surface-400">
-            {{ loading ? '通常需要 30 秒 ~ 2 分钟' : '提交后 AI 将自动完成以下工作' }}
+            {{ loading ? t('aiIntro.durationHint') : t('aiIntro.willDo') }}
           </p>
         </div>
       </div>
@@ -118,7 +121,7 @@ function handleClose() {
       <div class="flex items-start gap-2 rounded-xl bg-brand-50 dark:bg-brand-900/30 px-4 py-3">
         <i class="ri-time-line mt-0.5 text-brand-500"></i>
         <p class="text-xs leading-relaxed text-brand-700 dark:text-brand-300">
-          预计耗时 <span class="font-semibold">30 秒 ~ 2 分钟</span>。规划期间请勿关闭页面，完成后将自动进入进度页查看结果。
+          {{ t('aiIntro.estimateBefore') }}<span class="font-semibold">{{ t('aiIntro.estimateDuration') }}</span>{{ t('aiIntro.estimateAfter') }}
         </p>
       </div>
     </div>
@@ -135,7 +138,7 @@ function handleClose() {
           />
         </svg>
         <span class="text-sm font-medium text-surface-700 dark:text-surface-200">
-          正在生成你的行程 · {{ elapsedText }}
+          {{ t('aiIntro.generating', { elapsed: elapsedText }) }}
         </span>
       </div>
 
@@ -209,7 +212,7 @@ function handleClose() {
       <div class="flex items-start gap-2 rounded-xl bg-warning-50 dark:bg-warning-900/20 px-4 py-3">
         <i class="ri-error-warning-line mt-0.5 text-warning-500"></i>
         <p class="text-xs leading-relaxed text-warning-700 dark:text-warning-300">
-          规划期间请勿关闭或刷新页面，否则可能中断生成。
+          {{ t('aiIntro.dontClose') }}
         </p>
       </div>
     </div>
@@ -220,18 +223,18 @@ function handleClose() {
           class="btn-ghost px-5 py-2.5 text-sm"
           @click="emit('close')"
         >
-          取消
+          {{ t('common.cancel') }}
         </button>
         <button
           class="btn-primary px-5 py-2.5 text-sm"
           @click="emit('confirm')"
         >
           <i class="ri-sparkling-line"></i>
-          开始规划
+          {{ t('landing.hero.cta') }}
         </button>
       </template>
       <span v-else class="text-xs text-surface-400 mr-auto">
-        <i class="ri-lock-line mr-1"></i>规划中不可关闭
+        <i class="ri-lock-line mr-1"></i>{{ t('aiIntro.locked') }}
       </span>
     </template>
   </UIModal>

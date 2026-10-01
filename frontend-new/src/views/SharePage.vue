@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { tripApi } from '@/api/trip'
 import { useToast } from '@/composables/useToast'
 import ShareView from '@/components/share/ShareView.vue'
@@ -11,6 +12,7 @@ import type { Trip } from '@/api/types'
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
+const { t } = useI18n()
 
 const token = computed(() => route.params.token as string)
 
@@ -38,7 +40,7 @@ async function fetchSharedTrip(pwd?: string) {
       needsPassword.value = true
     } else {
       notFound.value = true
-      toast.error('加载行程失败，请稍后重试')
+      toast.error(t('sharePage.loadFailed'))
     }
   } finally {
     loading.value = false
@@ -47,7 +49,7 @@ async function fetchSharedTrip(pwd?: string) {
 
 async function submitPassword() {
   if (!password.value.trim()) {
-    passwordError.value = '请输入访问密码'
+    passwordError.value = t('sharePage.enterPassword')
     return
   }
   unlockLoading.value = true
@@ -57,7 +59,7 @@ async function submitPassword() {
     trip.value = data
     needsPassword.value = false
   } catch {
-    passwordError.value = '密码错误，请重试'
+    passwordError.value = t('sharePage.passwordWrong')
   } finally {
     unlockLoading.value = false
   }
@@ -83,7 +85,7 @@ onMounted(() => {
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
           </svg>
         </div>
-        <p class="text-sm text-surface-500">正在加载行程...</p>
+        <p class="text-sm text-surface-500">{{ t('sharePage.loadingTrip') }}</p>
       </div>
     </div>
 
@@ -95,12 +97,12 @@ onMounted(() => {
             <path stroke-linecap="round" stroke-linejoin="round" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         </div>
-        <h1 class="text-xl font-bold text-surface-900 mb-2">行程不存在或已过期</h1>
+        <h1 class="text-xl font-bold text-surface-900 mb-2">{{ t('sharePage.notFoundTitle') }}</h1>
         <p class="text-sm text-surface-500 mb-8">
-          该分享链接无效或已失效，请联系行程所有者获取新的分享链接。
+          {{ t('sharePage.notFoundDesc') }}
         </p>
         <UIButton variant="primary" @click="goHome">
-          返回首页
+          {{ t('sharePage.backHome') }}
         </UIButton>
       </div>
     </div>
@@ -114,14 +116,14 @@ onMounted(() => {
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
             </svg>
           </div>
-          <h1 class="text-xl font-bold text-surface-900 mb-2">此行程需要密码访问</h1>
-          <p class="text-sm text-surface-500 mb-6">请输入行程所有者提供的访问密码</p>
+          <h1 class="text-xl font-bold text-surface-900 mb-2">{{ t('sharePage.passwordTitle') }}</h1>
+          <p class="text-sm text-surface-500 mb-6">{{ t('sharePage.passwordDesc') }}</p>
 
           <form @submit.prevent="submitPassword" class="space-y-4">
             <UIInput
               v-model="password"
               type="password"
-              placeholder="请输入访问密码"
+              :placeholder="t('sharePage.enterPassword')"
               :error="passwordError"
               @keyup.enter="submitPassword"
             />
@@ -131,7 +133,7 @@ onMounted(() => {
               :loading="unlockLoading"
               @click="submitPassword"
             >
-              解锁查看
+              {{ t('sharePage.unlock') }}
             </UIButton>
           </form>
         </div>
@@ -141,7 +143,7 @@ onMounted(() => {
             class="text-sm text-surface-500 hover:text-brand-600 transition-colors duration-200"
             @click="goHome"
           >
-            返回首页
+            {{ t('sharePage.backHome') }}
           </button>
         </div>
       </div>

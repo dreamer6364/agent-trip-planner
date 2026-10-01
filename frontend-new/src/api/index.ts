@@ -1,4 +1,5 @@
 import axios, { type AxiosInstance, type InternalAxiosRequestConfig } from 'axios'
+import i18n from '@/i18n'
 import type { ApiResponse } from './types'
 
 const API_BASE = import.meta.env.VITE_API_BASE || ''
@@ -40,16 +41,16 @@ export class ApiError extends Error {
 
 function defaultStatusMessage(status?: number): string {
   switch (status) {
-    case 400: return '请求参数错误'
-    case 401: return '未登录或登录已过期'
-    case 403: return '没有权限执行该操作'
-    case 404: return '请求的资源不存在'
-    case 409: return '操作冲突，请刷新后重试'
-    case 429: return '请求过于频繁，请稍后再试'
-    case 500: return '服务器内部错误，请稍后重试'
-    case 502: return '服务暂时不可用，请稍后重试'
-    case 503: return '服务暂时不可用，请稍后重试'
-    default: return status ? `请求失败 (${status})` : '请求失败，请重试'
+    case 400: return i18n.global.t('api.status400')
+    case 401: return i18n.global.t('api.status401')
+    case 403: return i18n.global.t('api.status403')
+    case 404: return i18n.global.t('api.status404')
+    case 409: return i18n.global.t('api.status409')
+    case 429: return i18n.global.t('api.status429')
+    case 500: return i18n.global.t('api.status500')
+    case 502: return i18n.global.t('api.status502')
+    case 503: return i18n.global.t('api.status503')
+    default: return status ? i18n.global.t('api.statusFailWith', { status }) : i18n.global.t('api.statusFail')
   }
 }
 
@@ -75,10 +76,10 @@ export function toApiError(error: unknown): ApiError {
   }
 
   if (err?.code === 'ECONNABORTED') {
-    return new ApiError('请求超时，请重试', 'TIMEOUT')
+    return new ApiError(i18n.global.t('api.timeout'), 'TIMEOUT')
   }
 
-  return new ApiError('网络异常，请检查网络连接后重试', 'NETWORK_ERROR')
+  return new ApiError(i18n.global.t('api.network'), 'NETWORK_ERROR')
 }
 
 /** 响应拦截器 - 统一错误处理 + Token 刷新 */
