@@ -7,6 +7,7 @@ import com.tripplanner.common.exception.BizException;
 import com.tripplanner.common.response.ApiResponse;
 import com.tripplanner.common.response.Meta;
 import com.tripplanner.common.util.JsonUtils;
+import com.tripplanner.trip.client.AuthUserClient;
 import com.tripplanner.trip.client.PlanServiceClient;
 import com.tripplanner.trip.dto.request.CreateTripRequest;
 import com.tripplanner.trip.dto.request.UpdateTripRequest;
@@ -33,6 +34,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * 行程核心业务服务
@@ -53,6 +55,7 @@ public class TripService {
     private final ObjectMapper objectMapper;
     private final InlinePlanningService inlinePlanner;
     private final PlanServiceClient planServiceClient;
+    private final AuthUserClient authUserClient;
 
     /**
      * 创建行程 (AI Agent 规划)
@@ -280,6 +283,7 @@ public class TripService {
         List<TripResponse> items = trips.stream()
                 .map(this::toResponse)
                 .toList();
+        enrichAuthorNames(items);
 
         return TripListResponse.builder()
                 .items(items)
@@ -719,6 +723,7 @@ public class TripService {
             total = tripRepository.countPublicTripsByKeyword(kw);
         }
         List<TripResponse> items = trips.stream().map(this::toResponse).toList();
+        enrichAuthorNames(items);
 
         return TripListResponse.builder()
                 .items(items)
@@ -727,6 +732,32 @@ public class TripService {
                 .size(safeSize)
                 .totalPages((int) Math.ceil((double) total / safeSize))
                 .build();
+    }
+
+    /**
+     * 批量补充作者显示名（公开行程卡片展示用户名）
+     * 跨服务尽力而为：auth-service 不可用时降级为不返回名字（卡片回退展示 userId），绝不影响列表主流程
+     */
+    private void enrichAuthorNames(List<TripResponse> items) {
+        if (items == null || items.isEmpty()) {
+            return;
+        }
+        Set<String> userIds = items.stream()
+                .map(TripResponse::getUserId)
+                .filter(id -> id != null && !id.isBlank())
+                .collect(Collectors.toSet());
+        if (userIds.isEmpty()) {
+            return;
+        }
+        try {
+            ApiResponse<Map<String, String>> resp = authUserClient.getUserNames(new ArrayList<>(userIds));
+            Map<String, String> names = (resp != null && resp.getData() != null) ? resp.getData() : Map.of();
+            for (TripResponse item : items) {
+                item.setAuthorName(names.get(item.getUserId()));
+            }
+        } catch (Exception e) {
+            log.warn("获取作者显示名失败，降级为无作者名: {}", e.getMessage());
+        }
     }
 
     /**

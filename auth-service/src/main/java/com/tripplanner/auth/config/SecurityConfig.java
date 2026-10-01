@@ -64,6 +64,8 @@ public class SecurityConfig {
                         // 公开端点
                         .requestMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login", "/api/auth/refresh").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/auth/me").permitAll() // 允许匿名访问，由过滤器处理
+                        // 跨服务公开查询：批量获取用户名（卡片作者展示）
+                        .requestMatchers(HttpMethod.GET, "/api/users/names").permitAll()
                         // 文档端点
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         // Actuator 健康检查

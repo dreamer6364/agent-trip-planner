@@ -11,7 +11,39 @@ TripForge 的所有重要变更都会记录在此文件中。
 
 ---
 
-## [1.27.0] - 2026-10-01
+## [1.28.0] - 2026-10-01
+
+### 功能（公开行程卡片作者显示用户名）
+
+- **背景**：Explore 公开行程卡片此前直接展示作者 `userId`（36 位 UUID），可读性差；现改为展示用户名（auth 库 `users.name`），查不到时回退 userId
+- **auth-service**：
+  - 新增 `UserController`：`GET /api/users/names?ids=a,b,c` → `ApiResponse<Map<String,String>>`（id → 昵称），仅返回状态有效且昵称非空的用户，单次上限 100，只暴露显示名、不返回邮箱等敏感字段
+  - `UserService.getDisplayNames()`：去重 + `selectBatchIds` 批量查询
+  - `SecurityConfig` 放行该端点（`GET /api/users/names` permitAll）
+- **trip-service**：
+  - `TripResponse` 新增 `authorName` 字段
+  - 新增 `client/AuthUserClient` Feign（`auth.service.url`，默认 `localhost:8081`）+ `UserClientFeignConfig` 专属短超时（connect 1s / read 3s），避免 auth 抖动拖慢列表
+  - `application.yml` 新增 `auth.service.url`（`${AUTH_SERVICE_URL:...}`）
+  - `TripService.enrichAuthorNames()`：按去重 userId 批量解析并回填，**fail-open**（服务不可用仅 `log.warn` 降级，列表主流程不受影响）；接入 `listPublicTrips`（含关键词搜索分支）与 `listTrips`（我的行程，公开卡片同款徽标）
+- **前端**：
+  - `api/types.ts` `Trip` 新增 `authorName?: string`
+  - `TripCard.vue`：`authorLabel = authorName || userId`，展示改用该值；徽标样式去 `font-mono/break-all/select-all`（不再是长 ID）改 `truncate`
+  - 语言包：`tripCard.author` 占位符 `{id}` → `{name}`，`tripCard.authorId` 提示值「作者 ID / Author ID」→「作者 / Author」（zh/en 同步，仍 531 键对等）
+- 涉及文件：`auth-service`：`controller/UserController.java`（新增）、`service/UserService.java`、`config/SecurityConfig.java`；`trip-service`：`client/AuthUserClient.java`（新增）、`client/UserClientFeignConfig.java`（新增）、`service/TripService.java`、`dto/response/TripResponse.java`、`application.yml`、`test/.../TripServiceAuthorNameTest.java`（新增）；`frontend-new`：`components/trip/TripCard.vue`、`api/types.ts`、`i18n/zh-CN.json`、`i18n/en-US.json`
+
+### 验证方式与结果（2026-10-01）
+
+| 项 | 结果 |
+|---|---|
+| `mvn -o -q -pl trip-service,auth-service -am test` | 全部通过（含新增 `TripServiceAuthorNameTest` 4 例：正常填充 / auth 不可用 fail-open / 昵称缺失回退 / 关键词搜索分支）✓ |
+| `npm run build`（vue-tsc + vite） | 构建通过；语言包 531 键 zh/en 对等、0 缺失 ✓ |
+| 匿名直连 `GET :8081/api/users/names?ids=...` | HTTP 200，返回 `{"1111...":"Admin User","2222...":"Test User"}`（permitAll 生效，未返回邮箱）✓ |
+| `GET :8086/api/trips/public`（带 token，E2E） | 2 条公开行程 `authorName` 分别为 `Admin User`、`meng`，均非空且 ≠ `userId` ✓ |
+| `node verify-rest.js` 回归 | pass=23 fail=0 ✓ |
+| 部署 | stop → build → robocopy → `mvn -o -q -DskipTests package` → 定时启动 → 6/6 端口 UP（8081-8086）✓ |
+
+---
+
 
 ### 功能（中英文切换 i18n 全站落地）
 

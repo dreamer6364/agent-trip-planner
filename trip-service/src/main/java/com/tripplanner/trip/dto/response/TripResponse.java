@@ -36,6 +36,7 @@ public class TripResponse {
     private String city;
     private Integer activityCount;
     private List<String> landmarks;
+    private String authorName; // 作者显示名（公开行程卡片用，跨服务解析，可能为空）
 
     // 关联的最新版本信息 (可选)
     private TripVersionResponse latestVersion;

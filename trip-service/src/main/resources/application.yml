@@ -107,6 +107,11 @@ plan:
   service:
     url: ${PLAN_SERVICE_URL:http://localhost:8083}
 
+# Auth Service URL (公开行程作者显示名查询)
+auth:
+  service:
+    url: ${AUTH_SERVICE_URL:http://localhost:8081}
+
 # Feign 配置 (LLM 调用耗时较长，需加大超时)
 feign:
   client:

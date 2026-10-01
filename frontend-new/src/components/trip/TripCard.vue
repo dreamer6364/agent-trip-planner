@@ -107,7 +107,10 @@ const truncatedDescription = computed(() => {
   return text.length > 80 ? text.slice(0, 80) + '...' : text
 })
 
-const authorId = computed(() => (props.trip.isPublic ? props.trip.userId || '' : ''))
+const authorLabel = computed(() => {
+  if (!props.trip.isPublic) return ''
+  return props.trip.authorName || props.trip.userId || ''
+})
 
 function stopClick(e: Event) {
   e.stopPropagation()
@@ -253,12 +256,12 @@ async function confirmDelete() {
         </span>
       </div>
       <div
-        v-if="authorId"
-        class="mt-2.5 flex items-center gap-1.5 text-[11px] font-mono text-surface-400 dark:text-surface-500 break-all select-all"
+        v-if="authorLabel"
+        class="mt-2.5 flex items-center gap-1.5 text-[11px] text-surface-400 dark:text-surface-500 truncate"
         :title="t('tripCard.authorId')"
       >
         <i class="ri-user-3-line shrink-0 text-surface-400 dark:text-surface-500"></i>
-        <span>{{ t('tripCard.author', { id: authorId }) }}</span>
+        <span>{{ t('tripCard.author', { name: authorLabel }) }}</span>
       </div>
     </div>
 

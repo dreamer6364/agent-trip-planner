@@ -19,7 +19,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
@@ -160,6 +162,34 @@ public class UserService implements UserDetailsService {
         }
         user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
         userRepository.updateById(user);
+    }
+
+    /** 批量查询显示名单次上限（防止接口被滥用） */
+    private static final int MAX_NAME_LOOKUP_BATCH = 100;
+
+    /**
+     * 批量获取用户显示名（公开行程卡片展示作者用户名用）
+     * 仅返回状态有效且昵称非空的用户；缺失项由调用方自行回退（如回退到 userId）
+     */
+    @Transactional(readOnly = true)
+    public Map<String, String> getDisplayNames(List<String> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return Map.of();
+        }
+        List<String> ids = userIds.stream()
+                .filter(id -> id != null && !id.isBlank())
+                .distinct()
+                .limit(MAX_NAME_LOOKUP_BATCH)
+                .toList();
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        return userRepository.selectBatchIds(ids).stream()
+                .filter(u -> u != null
+                        && !"deleted".equals(u.getStatus())
+                        && u.getName() != null
+                        && !u.getName().isBlank())
+                .collect(Collectors.toMap(User::getId, User::getName, (a, b) -> a));
     }
 
     private UserPrincipal buildUserPrincipal(User user) {

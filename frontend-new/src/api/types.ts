@@ -95,6 +95,8 @@ export interface Trip {
   city?: string | null
   activityCount?: number
   landmarks?: string[]
+  /** 作者显示名（公开卡片用，服务端跨服务解析，可能为空） */
+  authorName?: string
   latestVersion?: TripVersion
 }
 
