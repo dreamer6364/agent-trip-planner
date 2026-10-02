@@ -45,7 +45,7 @@ public class PoiSearchService {
 
     private static final long CACHE_TTL_MS = 30 * 60 * 1000L;
     private static final Duration QUERY_TIMEOUT = Duration.ofSeconds(3);
-    private static final int MAX_RESULTS_PER_QUERY = 6;
+    private static final int MAX_RESULTS_PER_QUERY = 10;
     private static final int MAX_CACHE_SIZE = 200;
     private static final double MAX_DISTANCE_KM = 20.0;
 
@@ -61,7 +61,16 @@ public class PoiSearchService {
             new QueryPlan("park", "公园"),
             new QueryPlan("scenic", "历史街区"),
             new QueryPlan("other", "文化馆"),
-            new QueryPlan("other", "美术馆")
+            new QueryPlan("other", "美术馆"),
+            // 缺口填充候选扩容：热门景区/购物中心/特色风景（用户可接受的通用推荐类型）
+            new QueryPlan("scenic", "风景区"),
+            new QueryPlan("scenic", "旅游景点"),
+            new QueryPlan("shopping", "购物中心"),
+            new QueryPlan("shopping", "广场"),
+            new QueryPlan("scenic", "古镇"),
+            new QueryPlan("scenic", "古街"),
+            new QueryPlan("other", "观景台"),
+            new QueryPlan("park", "湿地")
     );
 
     /** 需要排除的 POI 大类（住宿、地产、政务、医疗、地名等） */

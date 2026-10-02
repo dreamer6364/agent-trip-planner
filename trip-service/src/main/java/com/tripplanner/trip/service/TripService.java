@@ -1088,26 +1088,31 @@ public class TripService {
                 String key = normalizeActivityName(name);
                 boolean dup = false;
                 if (meal) {
-                    // 同名餐厅全程去重 + 同日同餐次只保留一餐
-                    for (String prev : seenMeal) {
-                        if (key.equals(normalizeActivityName(prev)) || nameContains(name, prev)) {
-                            dup = true;
-                            break;
-                        }
-                    }
-                    if (!dup) {
-                        for (String prev : seenVisit) {
-                            if (key.equals(normalizeActivityName(prev))) {
-                                dup = true;
+                    // 同日同餐次只保留一餐：slot 已占用 → 判重剔除
+                    int day = toIntQuiet(a.getOrDefault("day", 1));
+                    String slot = mealSlotOf(name, a.get("scheduled_start"));
+                    if (!keptMealSlots.add(day + ":" + slot)) {
+                        dup = true;
+                    } else {
+                        // 撞名（与全程既有餐厅/景点重名）但当日该餐次仍空缺 → 保留：
+                        // 「同名餐厅全程去重」不得删空当日晚/午餐（见 CHANGELOG 1.29.0）
+                        boolean nameDup = false;
+                        for (String prev : seenMeal) {
+                            if (key.equals(normalizeActivityName(prev)) || nameContains(name, prev)) {
+                                nameDup = true;
                                 break;
                             }
                         }
-                    }
-                    if (!dup) {
-                        int day = toIntQuiet(a.getOrDefault("day", 1));
-                        String slot = mealSlotOf(name, a.get("scheduled_start"));
-                        if (!keptMealSlots.add(day + ":" + slot)) {
-                            dup = true;
+                        if (!nameDup) {
+                            for (String prev : seenVisit) {
+                                if (key.equals(normalizeActivityName(prev))) {
+                                    nameDup = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (nameDup) {
+                            log.info("入库去重: 撞名但当日{}餐空缺，保留正餐: day={}, name={}", slot, day, name);
                         }
                     }
                     if (!dup) seenMeal.add(name);
@@ -1169,10 +1174,13 @@ public class TripService {
             if (name.contains("晚")) return "d";
             if (name.contains("午")) return "l";
         }
+        // 时间回退：兼容 "HH:mm" 与 ISO "yyyy-MM-ddTHH:mm:ss"（旧逻辑 substring(11,13)
+        // 对 HH:mm 恒越界 → 无餐次字的晚餐被判成午餐，被 slot 去重删空，见 BUGFIX 1.29.0）
         try {
-            String t = start == null ? "" : start.toString();
-            if (t.length() >= 5) {
-                int h = Integer.parseInt(t.substring(11, 13));
+            String t = start == null ? "" : start.toString().trim();
+            int ci = t.indexOf(':');
+            if (ci > 0) {
+                int h = Integer.parseInt(t.substring(Math.max(0, ci - 2), ci));
                 if (h < 10) return "b";
                 if (h > 16) return "d";
                 return "l";

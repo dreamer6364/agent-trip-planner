@@ -11,6 +11,41 @@ TripForge 的所有重要变更都会记录在此文件中。
 
 ---
 
+## [1.29.0] - 2026-10-01
+
+### 功能增强（行程空闲填充扩容 + 每日正餐保障闭环）
+
+- **空闲填充候选扩容（A 组）** —— 解决「半天只有 1-2 个游览 / 大段空窗」：
+  - `PoiSearchService`：单次检索上限 `MAX_RESULTS_PER_QUERY` 6 → 10；QueryPlan 关键词扩容 8 组（风景名胜/旅游景点/购物中心/广场/古镇/古街/观景台/湿地）
+  - `buildCityPool` 候选门槛 12 → 24、`searchCityDiverse` 目标 14 → 30；新增 `FALLBACK_FILL_KEYWORDS` + `growPoolOnline()` 在线增量扩池——静态池耗尽时按关键词补真 POI 后重试，杜绝占位符（`自由活动/市区漫步` 之类会被后续清洗剔除成空闲）
+  - `replaceNonPlaceVisits` / `fillPaceGaps` / `fillDayGaps` / `ensureCompleteItinerary` 全量候选池化（静态池 + 线上 POI），换版排除项/用户原文透传全部调用点
+  - 填充触发：日游览时长/景点数未达节奏下限且存在 ≥120 分钟大空窗（`idleWindowMin`）才继续填，避免无休止补活动；同日守卫 12 → 16
+- **每日正餐保障闭环（B 组，接续 1.23.0 保底体系）**：
+  - **终末兜底（B7）**：`postPipeline` 末尾（最后一次 `fixTimeOverlaps` 之后）再挂一次 `ensureDailyMealsStep`——rest 插入/收口裁剪可能挤掉正餐；新增 `pushFromIndex` 供补餐自行完成级联右推（其后已无 fixTimeOverlaps）
+  - **21:00 收口不删餐（B8）**：`fixTimeOverlaps` 此前会把被挤过 21:00 的用餐整条剔除；改为「用餐绝不优先删除」——先截断该餐到 21:00 前（≥15 分钟），不够则回溯截短其前方可截的用餐，仍不行才兜底剔除（防死循环）
+  - **出窗餐回收 + 窗口右缘收紧 + 旅行切分（B11）**：详见 `docs/BUGFIX.md` 1.29.0
+- **数据守卫（B9/B10）**：落库餐次 HH:mm 解析与撞名保留、地理编码跨城校验、毒路线守卫、换版地名补全——详见 `docs/BUGFIX.md` 1.29.0
+- 涉及文件：
+  - `plan-service`：`service/PoiSearchService.java`、`agent/TripPlanningAgent.java`、`agent/DailyMealPlanner.java`、`service/GeocodeService.java`、`src/test/.../agent/DailyMealPlannerTest.java`
+  - `trip-service`：`service/TripService.java`
+  - `common-module`：`util/CityOwnershipUtils.java`
+  - E2E 脚本：`verify-meals.js`（新增，午/晚餐作息窗口 4 用例校验）
+
+### 验证方式与结果（2026-10-01）
+
+| 项 | 结果 |
+|---|---|
+| `DailyMealPlannerTest` | 20/20 PASS（18 → 20：新增「越 13:30 零打扰拒绝回落」「80 分钟长路程旅行切分」2 例，改造双候选用例适配窗口右缘收紧）✓ |
+| plan-service 全套单测 | 56/56 PASS ✓ |
+| trip-service 全套单测 | 32/32 PASS ✓ |
+| `node verify-meals.js`（杭州3d / 长白山2d / 北京3d / 成都2d） | **pass=60 fail=0**——10/10 天午+晚齐全、午餐起点 ∈[11:00,13:30]、晚餐起点 ∈[17:00,19:30]、午→晚 ≥90min、收口 ≤21:00 全过（修复前 5 处窗口违规，见 BUGFIX 1.29.0）✓ |
+| `node verify-rest.js` 回归 | pass=23 fail=0（旅行切分后 REST-4 相邻不变式仍全过）✓ |
+| `node check-time.js`（DB 最新版本） | 本轮 5 个行程最终版本 0 FAIL ✓ |
+| plan-service 日志抽查 | 出窗回收 27 条「出窗→重放」、2 条「无槽→保留原位」，0 条「保底失败」异常 ✓ |
+| 部署 | stop → `mvn -o -DskipTests package` → start → 6/6 UP（8081-8086）；无前端改动跳过 npm build/robocopy ✓ |
+
+---
+
 ## [1.28.0] - 2026-10-01
 
 ### 功能（公开行程卡片作者显示用户名）

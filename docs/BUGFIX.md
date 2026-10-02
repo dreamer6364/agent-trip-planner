@@ -11,6 +11,46 @@ TripForge 的所有 Bug 修复都会记录在此文件中。
 
 ---
 
+## [1.29.0] - 2026-10-01
+
+### 修复（正餐落出作息窗口 / 21:00 收口删餐 / 落库餐次误判 / 跨城数据污染）
+
+- **作息窗口违规（E2E 实锤 5 处，全部清零）**
+  - **现象**：`verify-meals` 首轮 5 FAIL——caseA d1 午餐 14:45、caseC d1 午餐 14:20 / 晚餐 19:33、caseC d2 午餐 13:58 / 晚餐 19:52（窗口：午 11:00-13:30、晚 17:00-19:30）
+  - **根因**：LLM 原生餐先被人性化校准钳回窗口，其后填充活动插入 / 真实路网修正又经 `fixTimeOverlaps` 把餐顺延出窗口；`ensureDailyMeals` 只补「缺失」不回收「出窗」，补餐自身还允许落位到 15:00/20:00——没有任何步骤把餐收回窗口（日志 0 条「保底」触发实锤）
+  - **修复（B11 三件套）**：
+    1. **出窗餐回收**：`ensureDailyMeals` 逐天把落出窗口的午/晚餐摘下重放（复用原对象保留名称/坐标/餐厅），窗口内确实无槽时原样放回——宁出窗不可丢餐；同餐次重复出窗餐才丢弃
+    2. **窗口右缘收紧**：`DailyMealPlanner` 实际落位上限由「午 15:00 / 晚 20:00」收紧为窗口右缘 13:30 / 19:30；仅当首日出发时刻本身晚于右缘时退化回旧口径（保住「晚出发也能补餐」）
+    3. **旅行切分**：插入空隙起点 = 上一活动结束 + `min(原路程, 15 分钟)`——景区→市区 58 分钟长路程不再整段压在餐前把餐顶出窗口；落位侧同步把上一活动路程收缩为「到正餐」步行段、剩余段由餐到下一段承担，维持 REST-4 相邻不变式（餐起点 ≥ 上一活动结束 + 上一活动到餐的路程）
+    4. 出窗重放/级联右推会改变时间轴——任意落位发生即按天重建输出并重排，避免原列表相对顺序过期
+  - **21:00 收口删餐（B8）**：`fixTimeOverlaps` 对被挤过 21:00 的用餐原先是整条剔除（丢餐另一根因链）；改为「用餐绝不优先删除」——先截断该餐至 21:00 前（≥15 分钟），不够则回溯截短其前方可截的用餐，仍不行才兜底剔除（防死循环）
+  - **管道终末兜底（B7）**：`postPipeline` 末尾（rest 插入 / 收口修复之后）再挂一次 `ensureDailyMealsStep`，新增 `pushFromIndex` 自行级联右推（其后无 fixTimeOverlaps 可依赖）
+- **落库餐次误判（B9）**
+  - **现象**：无餐次字的晚餐被 slot 去重删空；「撞名但当日晚餐仍空缺」的正餐被同名全程去重误删
+  - **根因**：`TripService.mealSlotOf` 用 `substring(11,13)` 取小时——只对 ISO `yyyy-MM-ddTHH:mm:ss` 成立，对 `HH:mm` 恒越界 → 晚餐被判成午餐，slot 冲突删空；`dedupeActivitiesForPersist` 撞名判定不看餐次槽位
+  - **修复**：时间解析改 `indexOf(':')` + `substring(max(0, ci-2), ci)` 兼容 `HH:mm` 与 ISO；去重先锁「同日同餐次唯一」，撞名但当日在窗餐次仍空缺时保留正餐并记日志（`入库去重: 撞名但当日x餐空缺，保留正餐`）
+- **跨城数据污染（B10）**
+  - **现象**：高德把「长白山」编码回北京坐标，产生 695km / 382min 毒路线；换版排除检索缺「西单/日坛」等地名漏过滤；长白山地名在城市归属表缺登记被当跨城剔除
+  - **修复**：
+    - `GeocodeService`：抽出静态 `CITY_CENTERS`（补长春/大连），`resultCityMatches` 三级裁决 = 名称匹配 → 已知中心 150km 距离裁决 → 未知区域名（如长白山）放行；应用于 Redis 缓存 / DB 缓存 / 主响应（3.5 丢弃置 null 走 POI 兜底）/ POI 兜底（3.6）全路径，不跨城才写缓存
+    - 路线守卫：`correctStep` 写回循环 `routeLooksPoisoned`（>300km 或 >240min）→ `reestimateRouteFromCoords`（直线 ×1.35 重估，仍超限返 null 保留原值）；`fillZeroTravelTimes` 直线 >300km 置 -1 走无坐标经验值
+    - `CityOwnershipUtils`：CITIES 补「长白山」；登记长白山天池/长白瀑布/聚龙火山温泉/绿渊潭/地下森林/美人松公园/二道白河/长白山国际度假区（**不**登记裸「天池」，避免抢注新疆天池）；北京组补 西单/西单大悦城/西单商场/日坛/日坛公园
+- 涉及文件：`plan-service/.../agent/DailyMealPlanner.java`、`agent/TripPlanningAgent.java`、`service/GeocodeService.java`、`service/PoiSearchService.java`（A 组联动）、`trip-service/.../service/TripService.java`、`common-module/.../util/CityOwnershipUtils.java`、`plan-service/src/test/.../agent/DailyMealPlannerTest.java`
+
+### 验证方式与结果（2026-10-01）
+
+| 项 | 结果 |
+|---|---|
+| `node verify-meals.js` | **60/0**——修复前 5 处窗口违规（14:45 / 14:20 / 19:33 / 13:58 / 19:52）全部清零；10/10 天午+晚齐全 ✓ |
+| `node verify-rest.js` | 23/0——旅行切分后 REST-4 相邻不变式全过 ✓ |
+| `DailyMealPlannerTest` | 20/20（新增窗口右缘、旅行切分 2 例；改造 1 例适配）✓ |
+| plan-service / trip-service 全量单测 | 56/56、32/32 ✓ |
+| 出窗回收日志（plan-service） | 27 条「出窗→重放」成功、2 条「无槽→保留原位」、0 条失败/丢餐 ✓ |
+| `node check-time.js`（DB 最新版本抽查） | 本轮 5 个行程最终版本 0 FAIL ✓ |
+| 部署回归 | stop → `mvn -o -DskipTests package` → start → 6/6 UP（8081-8086）✓ |
+
+---
+
 ## [1.27.0] - 2026-10-01
 
 ### 修复（语言切换按钮点击后界面语言不变）

@@ -41,28 +41,45 @@ public class GeocodeService {
     private static final long CACHE_TTL_DAYS = 30;
     private static final com.fasterxml.jackson.databind.ObjectMapper MAPPER = new com.fasterxml.jackson.databind.ObjectMapper();
 
+    /** 跨城结果裁决半径：已知城市中心 + 名称均不匹配且距离超限才判定为毒坐标（BUGFIX 1.29.0 B10） */
+    private static final double CROSS_CITY_RADIUS_KM = 150.0;
+
     /**
      * 地理编码 (地址/名称 -> 坐标)
+     * <p>
+     * 全路径跨城校验（Redis 缓存 / DB 缓存 / 主响应 / POI 兜底）：名称匹配或距已知城市中心
+     * ≤150km 才放行；跨城结果视为毒坐标（695km/382min 案例），丢弃后继续走 POI citylimit
+     * 兜底与内置坐标，且不写缓存，避免污染后续请求。
      */
     public GeocodeResponse geocode(String query, String city, String source) {
-        // 1. Redis 缓存查询
+        // 1. Redis 缓存查询（跨城污染的缓存同样拦截）
         String cacheKey = buildCacheKey(query, city, source);
         Object cachedObj = redisTemplate.opsForValue().get(cacheKey);
         if (cachedObj != null) {
             GeocodeResponse cached = toGeocodeResponse(cachedObj);
-            if (cached != null) {
+            if (cached != null && resultCityMatches(cached, city)) {
                 log.debug("地理编码命中 Redis 缓存: {}", query);
                 return cached;
             }
+            if (cached != null) {
+                log.warn("丢弃跨城 Redis 缓存: query={}, cachedCity={}, requestCity={}",
+                        query, cached.getCity(), city);
+            }
         }
 
-        // 2. MySQL 缓存查询
+        // 2. MySQL 缓存查询（跨城不返回、不回填 Redis，走外部 API 重查）
         String queryHash = hashQuery(query, city, source);
         GeocodeCache dbCache = geocodeCacheRepository.findByHash(queryHash, source);
         if (dbCache != null) {
             GeocodeResponse response = toResponse(dbCache);
-            redisTemplate.opsForValue().set(cacheKey, response, CACHE_TTL_DAYS, TimeUnit.DAYS);
-            return response;
+            if (response != null && resultCityMatches(response, city)) {
+                redisTemplate.opsForValue().set(cacheKey, response, CACHE_TTL_DAYS, TimeUnit.DAYS);
+                return response;
+            }
+            if (response != null) {
+                log.warn("丢弃跨城 DB 缓存: query={}, cachedCity={}, requestCity={}",
+                        query, response.getCity(), city);
+            }
         }
 
         // 3. 调用外部 API
@@ -77,12 +94,22 @@ public class GeocodeService {
             log.warn("外部API地理编码失败: query={}, error={}", query, e.getMessage());
         }
 
-        // 3.5 POI 搜索兜底：地址型 geocode 对景点名命中率低（ENGINE_RESPONSE_DATA_ERROR 等）
+        // 3.5 跨城主响应丢弃：不落入下方缓存，改走 POI citylimit 兜底
+        if (response != null && response.isSuccess() && !resultCityMatches(response, city)) {
+            log.warn("丢弃跨城地理编码主响应: query={}, respCity={}, requestCity={}, lat={}, lng={}",
+                    query, response.getCity(), city, response.getLat(), response.getLng());
+            response = null;
+        }
+
+        // 3.6 POI 搜索兜底：地址型 geocode 对景点名命中率低（ENGINE_RESPONSE_DATA_ERROR 等）
         if ((response == null || !response.isSuccess()) && !"baidu".equalsIgnoreCase(source)) {
             GeocodeResponse place = callAmapPlace(query, city);
-            if (place != null && place.isSuccess()) {
+            if (place != null && place.isSuccess() && resultCityMatches(place, city)) {
                 log.info("POI搜索兜底成功: query={}, lat={}, lng={}", query, place.getLat(), place.getLng());
                 response = place;
+            } else if (place != null && place.isSuccess()) {
+                log.warn("丢弃跨城 POI 兜底: query={}, placeCity={}, requestCity={}",
+                        query, place.getCity(), city);
             }
         }
 
@@ -100,13 +127,59 @@ public class GeocodeService {
             }
         }
 
-        // 5. 缓存结果
+        // 5. 缓存结果（仅放行的城市一致结果；跨城已在 3.5/3.6 被置空）
         if (response != null && response.isSuccess()) {
             redisTemplate.opsForValue().set(cacheKey, response, CACHE_TTL_DAYS, TimeUnit.DAYS);
             saveToDb(query, city, source, response);
         }
 
         return response != null ? response : GeocodeResponse.failure(query, "地理编码失败");
+    }
+
+    /**
+     * 结果城市是否允许用于当前请求。
+     * <ul>
+     *   <li>请求城市/结果城市为空 → 放行（无法裁决）</li>
+     *   <li>名称匹配（去「市」后相等或互为前缀）→ 放行</li>
+     *   <li>名称不匹配：请求城市在已知中心表内 → 按 150km 半径距离裁决；不在表内（如
+     *       「长白山」类区域名，高德归属州/市与请求名天然不同）→ 放行，避免误杀</li>
+     * </ul>
+     */
+    private boolean resultCityMatches(GeocodeResponse result, String requestCity) {
+        if (requestCity == null || requestCity.isBlank()) {
+            return true;
+        }
+        if (fallbackCityMatches(result, requestCity)) {
+            return true;
+        }
+        double[] center = CITY_CENTERS.get(bareCity(requestCity));
+        if (center == null) {
+            return true;
+        }
+        if (result.getLat() == null || result.getLng() == null) {
+            return true;
+        }
+        double km = haversineKm(center[0], center[1], result.getLat(), result.getLng());
+        if (km <= CROSS_CITY_RADIUS_KM) {
+            return true;
+        }
+        log.debug("城市距离超限: requestCity={}, resultCity={}, dist={}km", requestCity, result.getCity(), Math.round(km));
+        return false;
+    }
+
+    /** 去掉尾部「市」；长度 ≤2 的不裁剪（避免「市」本身） */
+    private static String bareCity(String name) {
+        return name.endsWith("市") && name.length() > 2 ? name.substring(0, name.length() - 1) : name;
+    }
+
+    private static double haversineKm(double lat1, double lng1, double lat2, double lng2) {
+        double r = 6371.0;
+        double dLat = Math.toRadians(lat2 - lat1);
+        double dLng = Math.toRadians(lng2 - lng1);
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
+                * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+        return 2 * r * Math.asin(Math.sqrt(a));
     }
 
 /** 兜底结果城市是否允许用于当前请求 */
@@ -700,6 +773,48 @@ public class GeocodeService {
         return cityCenterFallback(query, city);
     }
 
+    /** 城市名 -> [lat, lng]。双用途：内置市中心兜底 + 跨城结果 150km 距离裁决（B10） */
+    private static final java.util.LinkedHashMap<String, double[]> CITY_CENTERS = new java.util.LinkedHashMap<>();
+
+    static {
+        CITY_CENTERS.put("北京", new double[]{39.9042, 116.4074});
+        CITY_CENTERS.put("上海", new double[]{31.2304, 121.4737});
+        CITY_CENTERS.put("广州", new double[]{23.1291, 113.2644});
+        CITY_CENTERS.put("深圳", new double[]{22.5431, 114.0579});
+        CITY_CENTERS.put("成都", new double[]{30.5728, 104.0668});
+        CITY_CENTERS.put("杭州", new double[]{30.2741, 120.1551});
+        CITY_CENTERS.put("西安", new double[]{34.3416, 108.9398});
+        CITY_CENTERS.put("重庆", new double[]{29.5630, 106.5516});
+        CITY_CENTERS.put("苏州", new double[]{31.2989, 120.5853});
+        CITY_CENTERS.put("南京", new double[]{32.0603, 118.7969});
+        CITY_CENTERS.put("武汉", new double[]{30.5928, 114.3055});
+        CITY_CENTERS.put("长沙", new double[]{28.2282, 112.9388});
+        CITY_CENTERS.put("青岛", new double[]{36.0671, 120.3826});
+        CITY_CENTERS.put("厦门", new double[]{24.4798, 118.0894});
+        CITY_CENTERS.put("昆明", new double[]{25.0389, 102.7183});
+        CITY_CENTERS.put("大理", new double[]{25.6065, 100.2676});
+        CITY_CENTERS.put("丽江", new double[]{26.8550, 100.2270});
+        CITY_CENTERS.put("三亚", new double[]{18.2528, 109.5119});
+        CITY_CENTERS.put("哈尔滨", new double[]{45.8038, 126.5349});
+        CITY_CENTERS.put("沈阳", new double[]{41.8057, 123.4315});
+        CITY_CENTERS.put("天津", new double[]{39.3434, 117.3616});
+        CITY_CENTERS.put("郑州", new double[]{34.7466, 113.6254});
+        CITY_CENTERS.put("合肥", new double[]{31.8206, 117.2272});
+        CITY_CENTERS.put("福州", new double[]{26.0745, 119.2965});
+        CITY_CENTERS.put("南昌", new double[]{28.6820, 115.8579});
+        CITY_CENTERS.put("贵阳", new double[]{26.6470, 106.6302});
+        CITY_CENTERS.put("南宁", new double[]{22.8170, 108.3665});
+        CITY_CENTERS.put("宁波", new double[]{29.8683, 121.5440});
+        CITY_CENTERS.put("无锡", new double[]{31.4912, 120.3119});
+        CITY_CENTERS.put("桂林", new double[]{25.2736, 110.2900});
+        CITY_CENTERS.put("洛阳", new double[]{34.6197, 112.4540});
+        CITY_CENTERS.put("敦煌", new double[]{40.1424, 94.6618});
+        CITY_CENTERS.put("拉萨", new double[]{29.6520, 91.1721});
+        CITY_CENTERS.put("乌鲁木齐", new double[]{43.8256, 87.6168});
+        CITY_CENTERS.put("长春", new double[]{43.8171, 125.3235});
+        CITY_CENTERS.put("大连", new double[]{38.9140, 121.6147});
+    }
+
     /** 城市名 -> 市中心坐标（API 失效时用于地图居中；仅 query 本身为城市名时命中） */
     private GeocodeResponse cityCenterFallback(String query, String city) {
         if (query == null || query.isBlank()) {
@@ -707,45 +822,9 @@ public class GeocodeService {
         }
         String name = query.trim();
         // 去掉常见后缀：成都市 -> 成都
-        String bare = name.endsWith("市") && name.length() > 2
-                ? name.substring(0, name.length() - 1)
-                : name;
+        String bare = bareCity(name);
 
-        java.util.LinkedHashMap<String, double[]> centers = new java.util.LinkedHashMap<>();
-        centers.put("北京", new double[]{39.9042, 116.4074});
-        centers.put("上海", new double[]{31.2304, 121.4737});
-        centers.put("广州", new double[]{23.1291, 113.2644});
-        centers.put("深圳", new double[]{22.5431, 114.0579});
-        centers.put("成都", new double[]{30.5728, 104.0668});
-        centers.put("杭州", new double[]{30.2741, 120.1551});
-        centers.put("西安", new double[]{34.3416, 108.9398});
-        centers.put("重庆", new double[]{29.5630, 106.5516});
-        centers.put("苏州", new double[]{31.2989, 120.5853});
-        centers.put("南京", new double[]{32.0603, 118.7969});
-        centers.put("武汉", new double[]{30.5928, 114.3055});
-        centers.put("长沙", new double[]{28.2282, 112.9388});
-        centers.put("青岛", new double[]{36.0671, 120.3826});
-        centers.put("厦门", new double[]{24.4798, 118.0894});
-        centers.put("昆明", new double[]{25.0389, 102.7183});
-        centers.put("大理", new double[]{25.6065, 100.2676});
-        centers.put("丽江", new double[]{26.8550, 100.2270});
-        centers.put("三亚", new double[]{18.2528, 109.5119});
-        centers.put("哈尔滨", new double[]{45.8038, 126.5349});
-        centers.put("沈阳", new double[]{41.8057, 123.4315});
-        centers.put("天津", new double[]{39.3434, 117.3616});
-        centers.put("郑州", new double[]{34.7466, 113.6254});
-        centers.put("合肥", new double[]{31.8206, 117.2272});
-        centers.put("福州", new double[]{26.0745, 119.2965});
-        centers.put("南昌", new double[]{28.6820, 115.8579});
-        centers.put("贵阳", new double[]{26.6470, 106.6302});
-        centers.put("南宁", new double[]{22.8170, 108.3665});
-        centers.put("宁波", new double[]{29.8683, 121.5440});
-        centers.put("无锡", new double[]{31.4912, 120.3119});
-        centers.put("桂林", new double[]{25.2736, 110.2900});
-        centers.put("洛阳", new double[]{34.6197, 112.4540});
-        centers.put("敦煌", new double[]{40.1424, 94.6618});
-        centers.put("拉萨", new double[]{29.6520, 91.1721});
-        centers.put("乌鲁木齐", new double[]{43.8256, 87.6168});
+        java.util.LinkedHashMap<String, double[]> centers = CITY_CENTERS;
 
         // query 本身必须是已知城市名（去掉尾部“市”后完全匹配）
         if (!centers.containsKey(bare)) {

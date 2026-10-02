@@ -2136,20 +2136,26 @@ public class TripPlanningAgent {
      * 顺序约束：enforceVariant 在真实路网修正前（改名后重新地理编码）；
      * fillPaceGaps 在预算裁剪前；refill 在收口裁剪前；
      * ensureDailyMealsStep 在最后一次去重（normalizeDailyMeals 后）与餐厅注解之间——
-     * 其后无任何去重步骤，补入的正餐不会被同名剔除（见 BUGFIX 1.23.0）。
+     * 其后无任何去重步骤，补入的正餐不会被同名剔除（见 BUGFIX 1.23.0）；
+     * 管道最末（最后一次 fixTimeOverlaps 之后）再挂一次 ensureDailyMealsStep 作终末兜底——
+     * 其后的裁剪/重排（rest 插入、收口修复）可能挤掉正餐，补餐自身完成级联右推，
+     * 不依赖后续 fixTimeOverlaps；同时回收被填充/修正顺延出作息窗口的既有正餐
+     * （见 CHANGELOG/BUGFIX 1.29.0）。
      */
     private List<ActivityStep> postPipeline() {
         return List.<ActivityStep>of(
                 // 景点/餐食名归一 + 去重 + 跨城过滤 + 餐名具体化
                 (acts, ctx) -> sanitizeActivityNames(acts),
-                (acts, ctx) -> replaceNonPlaceVisits(acts, ctx.getPlaces(), ctx.getCity()),
+                (acts, ctx) -> replaceNonPlaceVisits(acts, ctx.getPlaces(), ctx.getCity(),
+                        ctx.getExcludePois(), ctx.getRawInput()),
                 (acts, ctx) -> filterActivitiesByCity(acts, ctx.getCity()),
                 (acts, ctx) -> dedupeVisitActivities(acts, ctx.getCity()),
                 (acts, ctx) -> enrichMealNames(acts, ctx.getMeals(), ctx.getCity()),
                 (acts, ctx) -> dedupeVisitActivities(acts, ctx.getCity()),
                 // 完整性兜底（失败保留原活动），可能产出占位名需再洗一次
                 this::ensureCompleteStep,
-                (acts, ctx) -> replaceNonPlaceVisits(acts, ctx.getPlaces(), ctx.getCity()),
+                (acts, ctx) -> replaceNonPlaceVisits(acts, ctx.getPlaces(), ctx.getCity(),
+                        ctx.getExcludePois(), ctx.getRawInput()),
                 // 每日餐次归一后结构定稿
                 (acts, ctx) -> normalizeDailyMeals(acts),
                 (acts, ctx) -> dedupeVisitActivities(acts, ctx.getCity()),
@@ -2172,7 +2178,9 @@ public class TripPlanningAgent {
                 (acts, ctx) -> applyPaceBudget(acts, ctx.getPace()),
                 // 智能休息节点（按节奏频率插入，见 RestSchedulePolicy）→ 时间轴收口
                 this::insertRestStep,
-                (acts, ctx) -> fixTimeOverlaps(acts)
+                (acts, ctx) -> fixTimeOverlaps(acts),
+                // 终末餐次兜底：裁剪/重排后再补一次缺失的午/晚餐（自身完成级联右推）
+                this::ensureDailyMealsStep
         );
     }
 
@@ -2209,6 +2217,12 @@ public class TripPlanningAgent {
      * 等价判定不通过才采用，并避开已用餐厅与换版排除项——保证能通过落库侧
      * 「同名餐厅全程去重 + 同日同餐次唯一」的口径。</p>
      *
+     * <p>1.29.0 起额外承担<b>出窗餐回收</b>：把落出作息窗口（午 11:00-13:30 / 晚 17:00-19:30）
+     * 的既有正餐摘下重放（保留对象复用名称/坐标），窗口内确实无槽时原样放回
+     * （宁出窗不可丢餐）；插入落位采用旅行切分——上一活动到正餐的路程收缩为
+     * min(原路程, 默认 15 分钟)，长路程不再把正餐顶出窗口，同时维持 REST-4 相邻
+     * 不变式（见 BUGFIX 1.29.0）。</p>
+     *
      * @param timeStart 行程出发时刻（首日日窗口下界取 max(08:00, 出发时刻)）
      */
     private List<Map<String, Object>> ensureDailyMeals(List<Map<String, Object>> acts, String city,
@@ -2242,11 +2256,35 @@ public class TripPlanningAgent {
         }
 
         int added = 0;
+        int rePlaced = 0;
+        int restored = 0;
+        int dropped = 0;
         for (Map.Entry<Integer, List<Map<String, Object>>> entry : byDay.entrySet()) {
             int day = entry.getKey();
             List<Map<String, Object>> dayActs = entry.getValue();
             dayActs.sort(Comparator.comparing(a -> String.valueOf(
                     a.getOrDefault("startTime", a.getOrDefault("scheduled_start", "08:00")))));
+            // 出窗餐回收：把落出作息窗口（午 11:00-13:30 / 晚 17:00-19:30）的正餐摘下待重放
+            // （保留对象以复用名称/坐标/餐厅信息）。根因链：LLM 原生餐被人性化校准钳回窗口后，
+            // 其前插入的填充活动/真实路网修正又把餐经 fixTimeOverlaps 顺延推出窗口，
+            // 此前无任何步骤回收即导致作息窗口违规（见 BUGFIX 1.29.0）；
+            // 窗口内确实无槽时原样放回——宁出窗不可丢餐。
+            Map<String, Map<String, Object>> displaced = new HashMap<>();
+            java.util.Iterator<Map<String, Object>> disIt = dayActs.iterator();
+            while (disIt.hasNext()) {
+                Map<String, Object> a = disIt.next();
+                String sl = mealSlotOf(a);
+                if (!"l".equals(sl) && !"d".equals(sl)) continue;
+                int s = toMinuteOfDay(a.containsKey("startTime") ? a.get("startTime") : a.get("scheduled_start"));
+                if (s < 0) continue;
+                boolean isLunch = "l".equals(sl);
+                if (s < DailyMealPlanner.winStart(isLunch) || s > DailyMealPlanner.winEnd(isLunch)) {
+                    disIt.remove();
+                    if (displaced.putIfAbsent(sl, a) != null) {
+                        dropped++; // 同餐次第二顿出窗餐：摘下后不再放回（归一保证正常只有一顿）
+                    }
+                }
+            }
             Set<String> slots = new HashSet<>();
             for (Map<String, Object> a : dayActs) {
                 String slot = mealSlotOf(a);
@@ -2256,7 +2294,12 @@ public class TripPlanningAgent {
 
             for (boolean lunch : new boolean[]{true, false}) {
                 String slot = lunch ? "l" : "d";
-                if (slots.contains(slot)) continue;
+                Map<String, Object> displacedMeal = displaced.remove(slot);
+                if (slots.contains(slot)) {
+                    // 同餐次已有在窗正餐：出窗重复餐不放回
+                    if (displacedMeal != null) dropped++;
+                    continue;
+                }
 
                 List<DailyMealPlanner.Item> items = new ArrayList<>(dayActs.size());
                 for (Map<String, Object> a : dayActs) {
@@ -2264,43 +2307,105 @@ public class TripPlanningAgent {
                 }
                 DailyMealPlanner.Placement p = DailyMealPlanner.plan(items, lunch, dayFloor);
                 if (p == null) {
-                    log.info("每日正餐保底: day{} {}餐时间不允许，跳过", day, lunch ? "午" : "晚");
+                    if (displacedMeal != null) {
+                        dayActs.add(displacedMeal);
+                        restored++;
+                        log.info("每日正餐保底: day{} {}餐出窗且窗口内无槽，保留原位 {}", day,
+                                lunch ? "午" : "晚", displacedMeal.get("startTime"));
+                    } else {
+                        log.info("每日正餐保底: day{} {}餐时间不允许，跳过", day, lunch ? "午" : "晚");
+                    }
                     continue;
                 }
-                double[] ref = coordBefore(dayActs, p.index());
-                BackstopMeal named = backstopMealName(lunch, city, meals,
-                        usedRestaurants, allNames, excludePois,
-                        ref == null ? null : ref[0], ref == null ? null : ref[1]);
-                if (named == null) {
-                    log.warn("每日正餐保底: day{} {}餐无可用名称，跳过", day, lunch ? "午" : "晚");
-                    continue;
+                boolean rePlace = displacedMeal != null;
+                BackstopMeal named = null;
+                if (!rePlace) {
+                    double[] ref = coordBefore(dayActs, p.index());
+                    named = backstopMealName(lunch, city, meals,
+                            usedRestaurants, allNames, excludePois,
+                            ref == null ? null : ref[0], ref == null ? null : ref[1]);
+                    if (named == null) {
+                        log.warn("每日正餐保底: day{} {}餐无可用名称，跳过", day, lunch ? "午" : "晚");
+                        continue;
+                    }
                 }
-                LocalTime start = LocalTime.of(Math.floorDiv(p.startMin(), 60), Math.floorMod(p.startMin(), 60));
-                Map<String, Object> meal = newAct(day, named.name(), "meal", start,
-                        DailyMealPlanner.MEAL_DURATION_MIN);
-                meal.put("travelTimeMin", p.travelMin());
-                meal.put("travelDistanceKm",
-                        Math.round(p.travelMin() * 0.067 * 10.0) / 10.0);
-                if (named.coord() != null) {
-                    meal.put("lat", named.coord()[0]);
-                    meal.put("lng", named.coord()[1]);
+                // 旅行切分：上一活动到正餐的路程收缩为 min(原路程, 默认 15 分钟)——长路程
+                // （如景区 → 市区 58 分钟）不再整段压在正餐之前，正餐才能在窗口内落位；
+                // 餐到下一段的路程由正餐自身承担，维持 REST-4 相邻不变式
+                // （正餐起点 ≥ 上一活动结束 + 上一活动到正餐的路程）
+                int splitTravel = 0;
+                if (p.index() > 0) {
+                    Map<String, Object> prevAct = dayActs.get(p.index() - 1);
+                    int prevTravel = toIntSafe(prevAct.getOrDefault("travelTimeMin",
+                            prevAct.get("travel_duration_min")));
+                    splitTravel = Math.max(0, Math.min(prevTravel, DailyMealPlanner.DEFAULT_TRAVEL_MIN));
+                    Object dist = prevAct.getOrDefault("travelDistanceKm", prevAct.get("travel_distance_km"));
+                    prevAct.put("travelTimeMin", splitTravel);
+                    if (dist instanceof Number dn && prevTravel > 0) {
+                        prevAct.put("travelDistanceKm",
+                                Math.round(dn.doubleValue() * splitTravel / prevTravel * 10.0) / 10.0);
+                    }
+                }
+                // 实际落位 = max(候选, 上一活动结束 + 到正餐路程)；随后按 fixTimeOverlaps 同构规则
+                // 后推插入点之后的活动——本步可能位于管道末尾（其后无 fixTimeOverlaps），
+                // 必须自行保证无重叠且 ≤21:00（级联可行性已由 planner 校验）
+                int gapStart = p.index() == 0 ? dayFloor
+                        : items.get(p.index() - 1).startMin() + items.get(p.index() - 1).durMin() + splitTravel;
+                int mealStart = Math.max(p.startMin(), gapStart);
+                pushFromIndex(dayActs, p.index(),
+                        mealStart + DailyMealPlanner.MEAL_DURATION_MIN + p.travelMin());
+                LocalTime start = LocalTime.of(Math.floorDiv(mealStart, 60), Math.floorMod(mealStart, 60));
+                Map<String, Object> meal;
+                if (rePlace) {
+                    meal = displacedMeal;
+                    Object oldStart = meal.get("startTime");
+                    applyActivityTime(meal, start, DailyMealPlanner.MEAL_DURATION_MIN);
+                    meal.put("travelTimeMin", p.travelMin());
+                    meal.put("travelDistanceKm",
+                            Math.round(p.travelMin() * 0.067 * 10.0) / 10.0);
+                    rePlaced++;
+                    log.info("每日正餐保底: day{} {}餐出窗({})，重放到 {}{}", day, lunch ? "午" : "晚",
+                            oldStart, toHhMm(mealStart), p.forced() ? "（级联右推）" : "");
+                } else {
+                    meal = newAct(day, named.name(), "meal", start,
+                            DailyMealPlanner.MEAL_DURATION_MIN);
+                    meal.put("travelTimeMin", p.travelMin());
+                    meal.put("travelDistanceKm",
+                            Math.round(p.travelMin() * 0.067 * 10.0) / 10.0);
+                    if (named.coord() != null) {
+                        meal.put("lat", named.coord()[0]);
+                        meal.put("lng", named.coord()[1]);
+                    }
+                    added++;
+                    log.info("每日正餐保底: day{} 补入{}餐 {} ({} 起{})", day,
+                            lunch ? "午" : "晚", named.name(), toHhMm(mealStart),
+                            p.forced() ? "，级联右推" : "");
                 }
                 dayActs.add(meal);
                 dayActs.sort(Comparator.comparing(a -> String.valueOf(
                         a.getOrDefault("startTime", a.getOrDefault("scheduled_start", "08:00")))));
                 slots.add(slot);
-                allNames.add(named.name());
-                String bare = mealBareName(named.name());
-                if (!bare.isBlank()) usedRestaurants.add(bare);
-                added++;
-                log.info("每日正餐保底: day{} 补入{}餐 {} ({} 起)", day,
-                        lunch ? "午" : "晚", named.name(), toHhMm(p.startMin()));
+                if (!rePlace) {
+                    allNames.add(named.name());
+                    String bare = mealBareName(named.name());
+                    if (!bare.isBlank()) usedRestaurants.add(bare);
+                }
+            }
+            if (!displaced.isEmpty()) {
+                // 兜底：任何未消费的出窗餐都不允许悄悄消失（防御分支，正常流程不会走到）
+                for (Map<String, Object> leftover : displaced.values()) {
+                    dayActs.add(leftover);
+                    restored++;
+                }
             }
         }
-        if (added == 0) {
+        if (added + rePlaced + dropped == 0) {
             return acts;
         }
-        log.info("每日正餐保底完成: 补入 {} 顿正餐", added);
+        log.info("每日正餐保底完成: 补入 {} 顿、出窗重放 {} 顿、保留原位 {} 顿、丢弃重复 {} 顿",
+                added, rePlaced, restored, dropped);
+        // 时间/结构有任何变动都重建输出：出窗餐的落位与级联右推会改变时间轴顺序，
+        // 原 acts 列表的相对顺序可能已过期，重建 + 排序保证下游拿到按时间轴有序的活动
         List<Map<String, Object>> out = new ArrayList<>(acts.size() + added);
         for (List<Map<String, Object>> dayActs : byDay.values()) {
             out.addAll(dayActs);
@@ -2693,12 +2798,26 @@ public class TripPlanningAgent {
      */
     private List<Map<String, Object>> replaceNonPlaceVisits(List<Map<String, Object>> activities,
                                                             List<Map<String, Object>> places,
-                                                            String city) {
+                                                            String city,
+                                                            List<String> excludePois, String rawInput) {
         if (activities == null || activities.isEmpty()) return activities;
-        List<Map<String, Object>> pool = new ArrayList<>(CITY_ATTRACTIONS.getOrDefault(city, List.of()));
         Set<String> usedNames = new HashSet<>();
         for (Map<String, Object> a : activities) {
             usedNames.add(String.valueOf(a.getOrDefault("name", a.getOrDefault("poi_name", ""))));
+        }
+        // 全量候选池（静态景点 + 线上 POI）：静态池为空的城市也能替换成功，不产出/不残留占位符
+        List<Map<String, Object>> pool = buildCityPool(city);
+        removeExcludedFromPool(pool, excludePois, rawInput);
+        boolean hasUnused = false;
+        for (Map<String, Object> p : pool) {
+            String pn = String.valueOf(p.get("name"));
+            if (usedNames.stream().noneMatch(u -> samePlace(u, pn))) {
+                hasUnused = true;
+                break;
+            }
+        }
+        if (!hasUnused) {
+            growPoolOnline(pool, city, excludePois, rawInput, usedNames);
         }
         List<Map<String, Object>> out = new ArrayList<>();
         boolean changed = false;
@@ -2944,8 +3063,9 @@ public class TripPlanningAgent {
     /** 同天活动按时间排序并顺延，保证真实路程时间反映到下一起点：
      * start_i ≥ end_{i-1} + travelTimeMin_{i-1}。只后推不前拉。
      * 迭代裁剪 21:00 作息窗口：某活动结束晚于 21:00 时，优先截断该活动；
-     * 若是用餐被挤到 21:00 之后，则剔除它前面最近的非用餐活动腾出时间；
-     * 两边都无法容纳时才剔除该活动。每轮必有进展，循环必然终止。
+     * 若是用餐被挤到 21:00 之后，则剔除它前面最近的非用餐活动腾出时间——
+     * 用餐绝不删除（前面无游览可剔时截断至 21:00 前 ≥15 分钟，
+     * 或收短其前面的用餐），两边都无法容纳时才剔除该活动。每轮必有进展，循环必然终止。
      */
     private List<Map<String, Object>> fixTimeOverlaps(List<Map<String, Object>> activities) {
         if (activities == null || activities.isEmpty()) return activities;
@@ -2956,6 +3076,7 @@ public class TripPlanningAgent {
         }
         List<Map<String, Object>> out = new ArrayList<>();
         int trimmed = 0;
+        int mealTruncated = 0;
         for (Map.Entry<Integer, List<Map<String, Object>>> e : byDay.entrySet()) {
             List<Map<String, Object>> dayActs = new ArrayList<>(e.getValue());
             dayActs.sort(Comparator.comparing(a -> String.valueOf(
@@ -3030,20 +3151,48 @@ public class TripPlanningAgent {
                         trimmed++;
                         continue;
                     }
+                    // 前面已无游览可剔：截断该餐到 21:00 前（≥15 分钟），绝不删餐
                     if (overStart.isBefore(dayEnd)) {
                         int remain = dayEnd.toSecondOfDay() / 60 - overStart.toSecondOfDay() / 60;
                         if (remain >= 15) {
                             applyActivityTime(dayActs.get(over), overStart, remain);
+                            mealTruncated++;
                             continue;
                         }
                     }
+                    // 连 15 分钟都腾不出（起点已到 21:00）：往前找可截断的用餐收短，仍不删餐
+                    boolean rescued = false;
+                    for (int k = over - 1; k >= 0; k--) {
+                        Map<String, Object> prev = dayActs.get(k);
+                        if (!isMealActivity(prev)) continue;
+                        LocalTime ps = parseTimeSafe(String.valueOf(
+                                prev.getOrDefault("startTime", prev.getOrDefault("scheduled_start", "00:00"))));
+                        int pd = toIntSafe(prev.get(durationKey(prev)));
+                        if (pd <= 0) pd = 60;
+                        // 让出 over 的时长：prev 截短到 overStart - prevStart（≥15 分钟才可行）
+                        int keep = overStart.toSecondOfDay() / 60 - ps.toSecondOfDay() / 60;
+                        if (keep >= 15 && keep < pd) {
+                            applyActivityTime(prev, ps, keep);
+                            mealTruncated++;
+                            rescued = true;
+                            break;
+                        }
+                    }
+                    if (rescued) continue;
+                    // 前面既无游览也无可截断用餐（理论上不可达）：兜底剔除，避免死循环
+                    dayActs.remove(over);
+                    trimmed++;
+                } else {
+                    dayActs.remove(over);
+                    trimmed++;
                 }
-                dayActs.remove(over);
-                trimmed++;
             }
         }
         if (trimmed > 0) {
             log.info("时间顺延裁剪超出 21:00 的活动: {} 个", trimmed);
+        }
+        if (mealTruncated > 0) {
+            log.info("时间顺延截断用餐以保住正餐: {} 处", mealTruncated);
         }
         out.sort((a, b) -> {
             int d1 = ((Number) a.getOrDefault("day", 1)).intValue();
@@ -3266,6 +3415,12 @@ public class TripPlanningAgent {
                         && guard++ < 20 && cursor.isBefore(LocalTime.of(21, 0))) {
                     String name = pickNextPlace(cityPool, places, usedNames, poolIdx++, city, lastLat, lastLng);
                     if (name == null) {
+                        // 静态池耗尽：在线补充真实 POI 后重试，杜绝占位名（占位名会被后续剔除导致空闲）
+                        if (growPoolOnline(cityPool, city, excludePois, rawInput, usedNames) > 0) {
+                            name = pickNextPlace(cityPool, places, usedNames, poolIdx++, city, lastLat, lastLng);
+                        }
+                    }
+                    if (name == null) {
                         name = "自由活动/市区漫步(" + day + "-" + dayActs.size() + ")";
                     }
                     int dur = name.contains("街") || name.contains("巷") ? 90 : 60;
@@ -3359,13 +3514,59 @@ public class TripPlanningAgent {
         return result;
     }
 
-    /** 城市候选池：静态景点 + 高德真实 POI（博物馆/商圈/夜市/公园），兜底时避免产出占位名 */
+    /** 候选池耗尽时的在线兜底关键词：通用热门类型（景点/景区/购物/网红打卡），不局限静态清单 */
+    private static final List<String> FALLBACK_FILL_KEYWORDS = List.of(
+            "旅游景点", "风景区", "购物中心", "网红打卡地", "特色街", "公园");
+
+    /**
+     * 候选池耗尽时在线补充：按通用热门关键词批量检索真实 POI 并入池。
+     * 过滤已用名（含近似名）与换版排除项，保证补进来的候选可被 pickUniquePlace/pickNextPlace 选用。
+     *
+     * @return 新增候选数（无网络/无结果返回 0）
+     */
+    private int growPoolOnline(List<Map<String, Object>> pool, String city,
+                               List<String> excludePois, String rawInput,
+                               Set<String> usedNames) {
+        if (pool == null || city == null || city.isBlank()) {
+            return 0;
+        }
+        int before = pool.size();
+        for (String kw : FALLBACK_FILL_KEYWORDS) {
+            if (pool.size() - before >= 8) {
+                break;
+            }
+            try {
+                List<Map<String, Object>> found = poiSearchService.searchByKeyword(kw, city, 10);
+                for (Map<String, Object> p : found) {
+                    String n = String.valueOf(p.getOrDefault("name", "")).trim();
+                    if (n.isEmpty() || isNonPlaceVisit(n)) {
+                        continue;
+                    }
+                    if (usedNames != null && usedNames.stream().anyMatch(u -> samePlace(u, n))) {
+                        continue;
+                    }
+                    if (pool.stream().noneMatch(q -> samePlace(String.valueOf(q.get("name")), n))) {
+                        pool.add(p);
+                    }
+                }
+            } catch (Exception e) {
+                log.debug("缺口填充在线候选补充失败: kw={}, err={}", kw, e.getMessage());
+            }
+        }
+        if (pool.size() > before) {
+            removeExcludedFromPool(pool, excludePois, rawInput);
+            log.info("缺口填充在线候选补充: {} -> {} 条 (city={})", before, pool.size(), city);
+        }
+        return pool.size() - before;
+    }
+
+    /** 城市候选池：静态景点 + 高德真实 POI（博物馆/商圈/夜市/公园/景区/购物），兜底时避免产出占位名 */
     private List<Map<String, Object>> buildCityPool(String city) {
         List<Map<String, Object>> pool = new ArrayList<>(
                 CITY_ATTRACTIONS.getOrDefault(city, List.of()));
-        if (city != null && !city.isBlank() && pool.size() < 12) {
+        if (city != null && !city.isBlank() && pool.size() < 24) {
             try {
-                List<Map<String, Object>> pois = poiSearchService.searchCityDiverse(city, 14);
+                List<Map<String, Object>> pois = poiSearchService.searchCityDiverse(city, 30);
                 for (Map<String, Object> poi : pois) {
                     if (pool.stream().noneMatch(p ->
                             samePlace(String.valueOf(p.get("name")), String.valueOf(poi.get("name"))))) {
@@ -3392,12 +3593,16 @@ public class TripPlanningAgent {
         }
         List<Map<String, Object>> pool = buildCityPool(city);
         removeExcludedFromPool(pool, excludePois, rawInput);
-        if (pool.isEmpty()) {
-            return activities;
-        }
         Set<String> usedNames = new HashSet<>();
         for (Map<String, Object> a : activities) {
             usedNames.add(String.valueOf(a.getOrDefault("name", a.getOrDefault("poi_name", ""))));
+        }
+        if (pool.isEmpty()) {
+            // 静态池被换版排除掏空时在线补充，避免整天无候选可用
+            growPoolOnline(pool, city, excludePois, rawInput, usedNames);
+        }
+        if (pool.isEmpty()) {
+            return activities;
         }
         Map<Integer, List<Map<String, Object>>> byDay = new TreeMap<>();
         for (Map<String, Object> a : activities) {
@@ -3409,7 +3614,8 @@ public class TripPlanningAgent {
         int totalAdded = 0;
         for (Map.Entry<Integer, List<Map<String, Object>>> entry : byDay.entrySet()) {
             List<Map<String, Object>> dayActs = new ArrayList<>(entry.getValue());
-            int added = fillDayGaps(dayActs, pool, null, usedNames, poolIdx, entry.getKey(), city, pace);
+            int added = fillDayGaps(dayActs, pool, null, usedNames, poolIdx, entry.getKey(), city, pace,
+                    excludePois, rawInput);
             poolIdx += Math.max(1, added);
             totalAdded += added;
             dayActs.sort(Comparator.comparing(a -> String.valueOf(
@@ -3479,27 +3685,36 @@ public class TripPlanningAgent {
     }
 
     /**
-     * 缺口填充：把 08:00-21:00 之间 ≥75 分钟的空白补上游览活动，
-     * 直到当日游览时长与景点数达到所选节奏的下限（候选耗尽即停，不产出占位名）。
+     * 缺口填充：把 08:00-21:00 之间的空白补上游览活动。
+     * 未达节奏下限时补到达标；已达下限但仍有 ≥120 分钟大空窗时继续补（填的是空闲），
+     * 直到窗口收窄或超过节奏景点数上限（候选耗尽先在线补充，仍耗尽即停，不产出占位名）。
      * 只在已有活动之间插入，不会把当天推到 21:00 之后。
      *
      * @return 本次新增的活动数
      */
     private int fillDayGaps(List<Map<String, Object>> dayActs, List<Map<String, Object>> cityPool,
                             List<Map<String, Object>> places, Set<String> usedNames,
-                            int poolIdx, int day, String city, TripPace pace) {
+                            int poolIdx, int day, String city, TripPace pace,
+                            List<String> excludePois, String rawInput) {
         final int close = 21 * 60;
+        final int idleWindowMin = 120;
         int targetMinutes = pace.getMinHours() * 60;
         int added = 0;
-        int guard = 12;
-        while (guard-- > 0
-                && (visitMinutes(dayActs) < targetMinutes || visitCount(dayActs) < pace.getMinVisits())
-                && visitCount(dayActs) < pace.getMaxVisits() + 2) {
+        int guard = 16;
+        boolean poolGrown = false;
+        while (guard-- > 0 && visitCount(dayActs) < pace.getMaxVisits() + 2) {
             List<int[]> windows = freeWindows(dayActs);
             if (windows.isEmpty()) {
                 break;
             }
             windows.sort((x, y) -> (y[1] - y[0]) - (x[1] - x[0]));
+            int largestGap = windows.get(0)[1] - windows.get(0)[0];
+            boolean belowFloor = visitMinutes(dayActs) < targetMinutes
+                    || visitCount(dayActs) < pace.getMinVisits();
+            // 已达节奏下限：仅当存在大空窗（≥120 分钟）才继续填，避免无休止补活动
+            if (!belowFloor && largestGap < idleWindowMin) {
+                break;
+            }
 
             // 阶段一：在能容纳新活动的时间窗插入一个景点
             boolean progressed = false;
@@ -3521,8 +3736,13 @@ public class TripPlanningAgent {
                     break;
                 }
                 String name = pickUniquePlace(cityPool, places, usedNames, poolIdx + added, city);
+                if (name == null && !poolGrown) {
+                    poolGrown = true;
+                    growPoolOnline(cityPool, city, excludePois, rawInput, usedNames);
+                    name = pickUniquePlace(cityPool, places, usedNames, poolIdx + added, city);
+                }
                 if (name == null) {
-                    log.info("day{} 缺口填充候选耗尽，停止", day);
+                    log.info("day{} 缺口填充候选耗尽（在线补充后仍为空），停止", day);
                     return added;
                 }
                 int start = win[0] + lead;
@@ -3935,6 +4155,33 @@ public class TripPlanningAgent {
             a.put("scheduled_start", startStr);
             a.put("scheduled_end", endStr);
             a.put("duration_min", durationMin);
+        }
+    }
+
+    /**
+     * 把 dayActs[fromIndex] 起的活动整体后推到不早于 earliestMin（fixTimeOverlaps 同构规则）：
+     * 起点 = max(原起点, 上一活动结束 + 上一段路程)，只后推不前拉。
+     *
+     * <p>用于每日正餐保底落位后同步右推被跨位插入挤到的活动——补餐步可能位于
+     * 管道末尾（其后无 fixTimeOverlaps），必须自行保证无重叠。级联可行性已由
+     * DailyMealPlanner.cascadeFits 校验（均 ≤21:00）。</p>
+     *
+     * @param fromIndex   起始下标（含）
+     * @param earliestMin 首个活动不得早于的分钟数（正餐结束 + 路程）
+     */
+    private void pushFromIndex(List<Map<String, Object>> dayActs, int fromIndex, int earliestMin) {
+        if (fromIndex >= dayActs.size() || earliestMin >= 24 * 60) return;
+        int cur = earliestMin;
+        for (int i = Math.max(0, fromIndex); i < dayActs.size(); i++) {
+            Map<String, Object> a = dayActs.get(i);
+            int s = toMinuteOfDay(a.containsKey("startTime") ? a.get("startTime") : a.get("scheduled_start"));
+            if (s < 0) s = cur;
+            if (s < cur) s = cur;
+            if (s >= 24 * 60) break;
+            int dur = toIntSafe(a.get(durationKey(a)));
+            if (dur <= 0) dur = 60;
+            applyActivityTime(a, LocalTime.of(Math.floorDiv(s, 60), Math.floorMod(s, 60)), dur);
+            cur = s + dur + Math.max(0, toIntSafe(a.get("travelTimeMin")));
         }
     }
 
@@ -4734,6 +4981,15 @@ public class TripPlanningAgent {
 
             Map<String, Object> realRoute = routeByIndex.get(i);
             String actName = String.valueOf(act.getOrDefault("name", "?"));
+            if (realRoute != null && routeLooksPoisoned(realRoute)) {
+                log.warn("修正[相邻段] {}→next 路程异常({}km/{}min)，疑似跨城毒坐标，改用已知坐标直线重估",
+                        actName, realRoute.get("dist"), realRoute.get("time"));
+                realRoute = reestimateRouteFromCoords(nameOfActivity(act), nameOfActivity(nextAct),
+                        coordMap, String.valueOf(act.getOrDefault("transportToNext", "")));
+                if (realRoute == null) {
+                    log.warn("修正[相邻段] {} 直线重估同样超限或缺坐标，保留原 travel 数据", actName);
+                }
+            }
             if (realRoute != null) {
                 act.put("transportToNext", realRoute.get("mode"));
                 act.put("travelTimeMin", realRoute.get("time"));
@@ -4800,6 +5056,12 @@ public class TripPlanningAgent {
             if (from != null && to != null) {
                 // from/to = [lng, lat]
                 roadKm = geoDistance(from[1], from[0], to[1], to[0]) / 1000.0 * 1.35;
+                if (roadKm > 300) {
+                    // 路线守卫（B10）：直线 >300km 的市内段 = 毒坐标，退回无坐标经验值
+                    log.warn("补全[相邻段] {}→{} 直线估算异常({}km)，疑似跨城毒坐标，按无坐标兜底",
+                            fromName, toName, Math.round(roadKm));
+                    roadKm = -1;
+                }
             }
 
             String mode = String.valueOf(act.getOrDefault("transportToNext", "")).trim().toLowerCase();
@@ -4842,6 +5104,44 @@ public class TripPlanningAgent {
         }
         int minutes = (int) Math.ceil(Math.max(0.2, roadKm) / speedKmh * 60.0);
         return Math.max(3, Math.min(minutes, 240));
+    }
+
+    /**
+     * 路程守卫（B10）：&gt;300km 或 &gt;240min 的市内相邻段视为跨城毒坐标产物
+     * （高德 695km/382min 案例），真实路线不可直接采信。
+     */
+    private boolean routeLooksPoisoned(Map<String, Object> route) {
+        if (route == null) {
+            return false;
+        }
+        double dist = route.get("dist") instanceof Number n ? n.doubleValue() : 0;
+        double time = route.get("time") instanceof Number n ? n.doubleValue() : 0;
+        return dist > 300 || time > 240;
+    }
+
+    /**
+     * 毒坐标路线的重估：用 coordMap 里已知坐标算直线 ×1.35 绕行系数估算；
+     * 直线仍 &gt;300km（坐标本身是跨城的）或缺坐标 → 返回 null，保留原 travel 数据，
+     * 由 {@link #fillZeroTravelTimes} 的同类守卫按无坐标经验值兜底。
+     */
+    private Map<String, Object> reestimateRouteFromCoords(String fromName, String toName,
+                                                          Map<String, double[]> coordMap, String mode) {
+        double[] from = coordMap.get(fromName);
+        double[] to = coordMap.get(toName);
+        if (from == null || to == null) {
+            return null;
+        }
+        double straightKm = geoDistance(from[1], from[0], to[1], to[0]) / 1000.0;
+        if (straightKm > 300) {
+            return null;
+        }
+        double roadKm = straightKm * 1.35;
+        String m = mode == null || mode.trim().isEmpty() ? (roadKm >= 2.0 ? "transit" : "walk") : mode.trim().toLowerCase();
+        int minutes = estimateTravelMinutes(roadKm, m);
+        if (minutes > 240) {
+            return null;
+        }
+        return buildRouteResult(m, minutes, Math.round(roadKm * 10.0) / 10.0, "");
     }
 
     /** 活动显示名（兼容 name / poi_name） */

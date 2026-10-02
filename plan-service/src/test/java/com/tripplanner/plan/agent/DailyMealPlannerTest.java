@@ -69,8 +69,10 @@ class DailyMealPlannerTest {
         assertThat(p).isNotNull();
         assertThat(p.index()).isEqualTo(2);
         assertThat(p.startMin()).isEqualTo(T1130);
-        // 推演：餐 12:18 落位 → 老城区 13:33 → 尾部 20:37 收尾，仍在 21:00 内
+        // 推演：餐 12:04 落位 → 老城区 13:19 → 尾部 20:23 收尾，仍在 21:00 内
         assertThat(p.travelMin()).isEqualTo(15);
+        // 空隙不足 60 分钟（eff+60 > gapEnd）→ 走级联右推而非零打扰
+        assertThat(p.forced()).isTrue();
     }
 
     @Test
@@ -88,15 +90,21 @@ class DailyMealPlannerTest {
     }
 
     @Test
-    @DisplayName("每日正餐保底 - 上一活动结束晚于午餐最晚落位 - 时间不允许")
-    void plan_lunch_prevEndsAfter1500_returnsNull() {
+    @DisplayName("每日正餐保底 - 上一活动压过整个午餐窗口 - 跨活动插入并右推（B6 丢餐修复）")
+    void plan_lunch_prevCoversWholeWindow_insertsBeforeActivity() {
+        // 09:15 → 17:00 连续活动覆盖 11:00-13:30 窗口：午餐插到活动之前，活动整段右推
         List<DailyMealPlanner.Item> items = List.of(
                 act(8 * 60, 60, 15),
                 act(9 * 60 + 15, 465, 15)); // 09:15 → 17:00
 
         DailyMealPlanner.Placement p = DailyMealPlanner.plan(items, true, FLOOR8);
 
-        assertThat(p).isNull();
+        assertThat(p).isNotNull();
+        assertThat(p.index()).isEqualTo(1);
+        assertThat(p.startMin()).isEqualTo(T1130);
+        assertThat(p.travelMin()).isEqualTo(15);
+        assertThat(p.forced()).isTrue();
+        // 推演：餐 11:30-12:30(+15) → 活动 12:45-20:30(+15) → 20:45 收口 ≤ 21:00
     }
 
     @Test
@@ -192,7 +200,127 @@ class DailyMealPlannerTest {
         assertThat(p).isNotNull();
         assertThat(p.index()).isEqualTo(1);
         assertThat(p.startMin()).isEqualTo(T1130);
-        // 推演口径 = fixTimeOverlaps：餐 12:30-13:30(+15) → B 13:45-15:15(+15) → C 15:30-17:30
+        // 推演口径 = fixTimeOverlaps：餐 12:15-13:15(+15) → B 13:30-15:00(+15) → C 15:15-17:15
+        // （旅行切分后空隙起点 = 12:00 + min(30, 15) = 12:15）
         assertThat(p.travelMin()).isEqualTo(15);
+    }
+
+    @Test
+    @DisplayName("每日正餐保底 - 首日 12:00 出发（floor 在窗口内） - 午餐候选起点不早于 floor")
+    void plan_lunch_floorInsideWindow_startsAtFloor() {
+        DailyMealPlanner.Placement p = DailyMealPlanner.plan(List.of(), true, 12 * 60);
+
+        assertThat(p).isNotNull();
+        assertThat(p.startMin()).isEqualTo(12 * 60);
+        assertThat(p.forced()).isFalse();
+    }
+
+    @Test
+    @DisplayName("每日正餐保底 - 首日 13:30 出发（窗口右缘） - 午餐落 13:30 且 14:30 收口")
+    void plan_lunch_floorAtWindowEdge_startsAt1330() {
+        DailyMealPlanner.Placement p = DailyMealPlanner.plan(List.of(), true, 13 * 60 + 30);
+
+        assertThat(p).isNotNull();
+        assertThat(p.startMin()).isEqualTo(13 * 60 + 30);
+        assertThat(p.startMin() + DailyMealPlanner.MEAL_DURATION_MIN)
+                .isLessThanOrEqualTo(DailyMealPlanner.DAY_END_MIN);
+    }
+
+    @Test
+    @DisplayName("每日正餐保底 - 首日 19:30 出发（晚餐窗口右缘） - 晚餐落 19:30 且 20:30 收口")
+    void plan_dinner_floorAtWindowEdge_startsAt1930() {
+        DailyMealPlanner.Placement p = DailyMealPlanner.plan(List.of(), false, 19 * 60 + 30);
+
+        assertThat(p).isNotNull();
+        assertThat(p.startMin()).isEqualTo(19 * 60 + 30);
+        assertThat(p.startMin() + DailyMealPlanner.MEAL_DURATION_MIN).isEqualTo(20 * 60 + 30);
+    }
+
+    @Test
+    @DisplayName("每日正餐保底 - 跨位插入后尾部恰好 21:00 收口 - 边界内放行")
+    void plan_lunch_cascadeEndsExactlyAt2100_allowed() {
+        // 09:15 → 17:30 大段活动：午餐插到其前，右推后活动 12:45-21:00 恰好收口（边界 ≤）
+        List<DailyMealPlanner.Item> items = List.of(
+                act(8 * 60, 60, 15),
+                act(9 * 60 + 15, 495, 0)); // 09:15 → 17:30
+
+        DailyMealPlanner.Placement p = DailyMealPlanner.plan(items, true, FLOOR8);
+
+        assertThat(p).isNotNull();
+        assertThat(p.index()).isEqualTo(1);
+        assertThat(p.startMin()).isEqualTo(T1130);
+        assertThat(p.forced()).isTrue();
+    }
+
+    @Test
+    @DisplayName("每日正餐保底 - 零打扰落位越过 13:30 窗口右缘 - 拒绝并回落目标时刻强制落位")
+    void plan_lunch_zeroOutsideWindowEdge_rejectedFallsBackToTarget() {
+        // 11:55-13:55 活动：其后的零打扰落位起点 14:10 越过窗口右缘 13:30（B11 收紧前的违规路径）
+        // → 拒绝该候选，回落目标时刻 11:30 级联插入并右推活动
+        List<DailyMealPlanner.Item> items = List.of(
+                act(8 * 60, 60, 15),
+                act(11 * 60 + 55, 120, 15)); // 11:55 → 13:55
+
+        DailyMealPlanner.Placement p = DailyMealPlanner.plan(items, true, FLOOR8);
+
+        assertThat(p).isNotNull();
+        assertThat(p.index()).isEqualTo(1);
+        assertThat(p.startMin()).isEqualTo(T1130);
+        assertThat(p.travelMin()).isEqualTo(15);
+        assertThat(p.forced()).isTrue();
+    }
+
+    @Test
+    @DisplayName("每日正餐保底 - 双候选选优 - 窗口内的后移零打扰候选优先于目标时刻 forced 落位")
+    void plan_lunch_laterCandidateZeroDisturbance_winsOverForced() {
+        // 11:30 落入 11:55 活动之前的不足空隙（需右推）；11:55-12:55 活动之后的空隙
+        // （13:10 起）在窗口内可零打扰 → 后移候选优先
+        List<DailyMealPlanner.Item> items = List.of(
+                act(8 * 60, 60, 15),
+                act(11 * 60 + 55, 60, 15)); // 11:55 → 12:55
+
+        DailyMealPlanner.Placement p = DailyMealPlanner.plan(items, true, FLOOR8);
+
+        assertThat(p).isNotNull();
+        assertThat(p.startMin()).isEqualTo(11 * 60 + 55);
+        assertThat(p.index()).isEqualTo(2);
+        assertThat(p.forced()).isFalse();
+    }
+
+    @Test
+    @DisplayName("每日正餐保底 - 上一活动路程 80 分钟 - 旅行切分后零打扰落位仍在窗口内")
+    void plan_lunch_longPrevTravel_slicedToStayInWindow() {
+        // 10:00-12:15 活动路程 80 分钟：切分前空隙起点 13:35 越过 13:30 只能级联（落位 13:35 越窗）；
+        // 切分后空隙起点 = 12:15 + min(80, 15) = 12:30，11:30 候选零打扰落入窗口
+        List<DailyMealPlanner.Item> items = List.of(
+                act(8 * 60, 60, 15),
+                act(10 * 60, 135, 80),  // 10:00 → 12:15（到下一段路程 80 分钟）
+                act(14 * 60, 90, 15));  // 14:00 → 15:30
+
+        DailyMealPlanner.Placement p = DailyMealPlanner.plan(items, true, FLOOR8);
+
+        assertThat(p).isNotNull();
+        assertThat(p.index()).isEqualTo(2);
+        assertThat(p.startMin()).isEqualTo(T1130);
+        assertThat(p.travelMin()).isEqualTo(15);
+        assertThat(p.forced()).isFalse();
+    }
+
+    @Test
+    @DisplayName("每日正餐保底 - 晚餐空隙恰好 60 分钟 - 零打扰落位且路程收缩为 0")
+    void plan_dinner_gapExactlyMealLength_zeroDisturbanceWithTravelCollapsed() {
+        // 18:00 活动之前恰有 17:00-18:00 空隙：零打扰插入，剩余空隙为 0 → travel 收缩到 0
+        List<DailyMealPlanner.Item> items = List.of(
+                act(8 * 60, 60, 15),
+                act(18 * 60, 130, 0)); // 18:00 → 20:10
+
+        DailyMealPlanner.Placement p = DailyMealPlanner.plan(items, false, FLOOR8);
+
+        assertThat(p).isNotNull();
+        assertThat(p.index()).isEqualTo(1);
+        assertThat(p.startMin()).isEqualTo(17 * 60);
+        assertThat(p.travelMin()).isZero();
+        assertThat(p.forced()).isFalse();
+        // 推演：餐 17:00-18:00(+0) → 活动 18:00-20:10 不动
     }
 }
