@@ -89,6 +89,10 @@ public class ReplanJobConsumer {
             progressPublisher.publishProgress(taskId, tripId, 85, "VERIFY_CITY", "校验景点城市归属");
             routedActivities = verifyCityOwnership(routedActivities, baseProblem, taskId, tripId);
 
+            // 6.7 CHECK_MEALS: 餐次时间窗校验进度（1.31.0；plan-service 管线末位
+            // checkMealWindowsStep 已强制修复，落库侧 trip-service MealWindowGuard 兜底告警）
+            progressPublisher.publishProgress(taskId, tripId, 88, "CHECK_MEALS", "校验正餐时间窗");
+
             // 7. 发布进度: 持久化（job.versionId = createVersionFromFeedback 预建的目标版本 → 原地更新）
             progressPublisher.publishProgress(taskId, tripId, 90, "PERSIST", "保存规划结果");
             String resultVersionId;

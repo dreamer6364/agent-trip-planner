@@ -183,6 +183,9 @@ public class TripService {
             activities = verifyCityOwnership(activities, city, trip.getId());
             // 入库前二次去重：景点/餐食不得重复
             activities = dedupeActivitiesForPersist(activities);
+            // 餐次时间窗守卫（1.31.0，仅告警）：兜住不经过 plan-service postPipeline 的直落路径
+            MealWindowGuard.warnIfViolations(activities, request.getTimeStart().toString(),
+                    "trip=" + trip.getId());
 
             // 生成路线信息 (基于活动序列)
             List<Map<String, Object>> routes = buildRoutesFromActivities(activities);
@@ -593,6 +596,10 @@ public class TripService {
             activities = verifyCityOwnership(activities, city, tripId);
             // 入库前二次去重：景点/餐食不得重复
             activities = dedupeActivitiesForPersist(activities);
+            // 餐次时间窗守卫（1.31.0，仅告警）：兜住不经过 plan-service postPipeline 的重规划路径
+            MealWindowGuard.warnIfViolations(activities,
+                    trip.getTimeStart() != null ? trip.getTimeStart().toString() : null,
+                    "trip=" + tripId);
 
             List<Map<String, Object>> routes = buildRoutesFromActivities(activities);
             Map<String, Object> stats = buildStatsFromActivities(

@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Activity } from '@/api/types'
-import { effectiveTravelMinutes } from '@/utils/activity'
+import { legToNext } from '@/utils/activity'
 import type { NavPoint } from '@/utils/navigation'
 import ActivityCard from './ActivityCard.vue'
 import TransitConnector from './TransitConnector.vue'
@@ -62,10 +62,12 @@ function handleFocus(activity: Activity) {
   emit('focus', activity)
 }
 
-/** 到下一站的交通分钟数：真实值优先，为 0 时按坐标估算，避免展示「0分钟」 */
-function travelToNext(activity: Activity, index: number): number {
-  return effectiveTravelMinutes(activity, props.day.items[index + 1])
-}
+/**
+ * 各活动到「下一站」的交通段（v1.31.0）：
+ * - 休息卡为 null → 卡片不展示、连接件隐藏
+ * - 休息前地点聚合「休息前 → 休息后」直达段（真实路程由 rest 节点携带）
+ */
+const legs = computed(() => props.day.items.map((_, i) => legToNext(props.day.items, i)))
 
 /**
  * 导航端点：活动有坐标直接用；无坐标（如 rest 原地休息）沿时间轴就近吸附到
@@ -135,21 +137,22 @@ function isActive(activity: Activity) {
               :activity="activity"
               :day-number="day.dayNumber"
               :active="isActive(activity)"
-              :travel-min="travelToNext(activity, index)"
+              :leg="legs[index]"
               @swap="handleSwap"
               @focus="handleFocus"
             />
           </div>
 
+          <!-- 连接件：休息卡不渲染；休息前地点渲染直达「休息后地点」的聚合段（v1.31.0） -->
           <TransitConnector
-            v-if="index < day.items.length - 1"
-            :mode="activity.transportMode || 'walk'"
-            :duration-min="travelToNext(activity, index)"
-            :distance-meters="Number(activity.travelDistanceMeters ?? 0)"
+            v-if="index < day.items.length - 1 && legs[index]"
+            :mode="legs[index]!.mode || activity.transportMode || 'walk'"
+            :duration-min="legs[index]!.minutes"
+            :distance-meters="legs[index]!.distanceMeters"
             :from-name="activity.poiName"
-            :to-name="day.items[index + 1]?.poiName"
+            :to-name="day.items[legs[index]!.toIndex]?.poiName"
             :from="navPointOf(index, -1)"
-            :to="navPointOf(index + 1, 1)"
+            :to="navPointOf(legs[index]!.toIndex, 1)"
           />
         </template>
       </div>

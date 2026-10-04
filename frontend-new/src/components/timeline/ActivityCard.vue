@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Activity } from '@/api/types'
 import { formatTimePoint, formatDurationText, TRANSPORT_LABELS } from '@/utils/activity'
+import type { TravelLeg } from '@/utils/activity'
 
 const { t } = useI18n()
 
@@ -11,8 +12,13 @@ const props = defineProps<{
   dayNumber: number
   /** 是否为当前在地图上聚焦的节点（高亮描边） */
   active?: boolean
-  /** 到下一站的交通分钟数（由时间轴计算，含 0 分钟兜底估算） */
+  /** 到下一站的交通分钟数（旧传参模式；传入 leg 时优先使用 leg） */
   travelMin?: number
+  /**
+   * 到下一站的交通段（v1.31.0，由时间轴按 rest 链聚合计算）：
+   * null=不展示交通信息（休息卡/链尾）；undefined=未启用 leg 模式（回退 travelMin 传参）
+   */
+  leg?: TravelLeg | null
 }>()
 
 const emit = defineEmits<{
@@ -103,17 +109,30 @@ const timeRange = computed(() => {
 
 const durationText = computed(() => formatDurationText(props.activity.durationMin))
 
-const transportHint = computed(() => {
-  const mode = props.activity.transportMode
-  const travel = Number(props.travelMin ?? props.activity.travelDurationMin ?? 0) || 0
+/** 组装「至下一站」提示文案（模式 · 分钟 · 距离）；模式缺失或 mixed 不展示 */
+function buildTransportHint(mode: string | undefined, travel: number, km: number): string {
   if (!mode || mode === 'mixed') return ''
   const label = TRANSPORT_LABELS[mode] || mode
-  const km = Number(props.activity.travelDistanceKm ?? 0) || 0
   const dist = km > 0 ? ` · ${km < 10 ? km.toFixed(1) : Math.round(km)}km` : ''
   const info = travel > 0
     ? `${label} ${formatDurationText(travel)}${dist}`
     : `${label}${dist}`
   return t('timeline.toNext', { info })
+}
+
+const transportHint = computed(() => {
+  // 休息卡：不展示任何距离/时间说明（v1.31.0；直达信息由休息前地点展示）
+  if (props.activity.activityType === 'rest') return ''
+  if (props.leg !== undefined) {
+    if (!props.leg) return ''
+    return buildTransportHint(props.leg.mode, props.leg.minutes, props.leg.distanceKm)
+  }
+  // 旧传参模式（未启用 leg 的调用方）
+  return buildTransportHint(
+    props.activity.transportMode,
+    Number(props.travelMin ?? props.activity.travelDurationMin ?? 0) || 0,
+    Number(props.activity.travelDistanceKm ?? 0) || 0,
+  )
 })
 
 /** 评分/人均（餐厅推荐增强 v1.15.0） */

@@ -36,6 +36,8 @@ const STAGE_ALIASES: Record<string, string> = {
   ROUTE: 'ROUTE',
   CONVERT: 'ROUTE',
   VERIFY_CITY: 'VERIFY_CITY',
+  CHECK_MEALS: 'CHECK_MEALS',
+  check_meals: 'CHECK_MEALS',
   SAVE_RESULT: 'SAVE_RESULT',
   PERSIST: 'SAVE_RESULT',
   COMPLETED: 'SAVE_RESULT',
@@ -52,6 +54,7 @@ const stages = computed(() => [
   { key: 'SOLVE', label: t('planning.stages.solve'), icon: '⚙️' },
   { key: 'ROUTE', label: t('planning.stages.route'), icon: '🗺️' },
   { key: 'VERIFY_CITY', label: t('planning.stages.verifyCity'), icon: '📍' },
+  { key: 'CHECK_MEALS', label: t('planning.stages.checkMeals'), icon: '🍽️' },
   { key: 'SAVE_RESULT', label: t('planning.stages.persist'), icon: '💾' },
 ])
 
@@ -67,6 +70,7 @@ const stageDescriptions = computed<Record<string, string>>(() => ({
   SOLVE: t('planningProgress.descriptions.solve'),
   ROUTE: t('planningProgress.descriptions.route'),
   VERIFY_CITY: t('planningProgress.descriptions.verifyCity'),
+  CHECK_MEALS: t('planningProgress.descriptions.checkMeals'),
   SAVE_RESULT: t('planningProgress.descriptions.saveResult'),
 }))
 

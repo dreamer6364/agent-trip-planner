@@ -36,23 +36,75 @@ function formatTime(isoString?: string): string {
   return formatTimePoint(isoString) || '--:--'
 }
 
-/** 同天下一段交通可导航（v1.22.1 分享页与时间轴一致） */
-function canNavNext(index: number): boolean {
+/**
+ * 到下一站的展示交通段（v1.31.0）：
+ * - 休息行 → null（休息不展示距离/时间）
+ * - 休息前行 → 聚合「休息前 → 休息后」直达段（真实路程由 rest 节点携带）
+ * - 无下一站/无行程 → null（与旧版 travelDurationMin>0 门控一致，不估算）
+ */
+function travelLeg(index: number): { mode: string; minutes: number } | null {
   const list = activities.value
   const cur = list[index]
-  const next = list[index + 1]
-  return !!cur && !!next && Number(cur.day || 1) === Number(next.day || 1)
+  if (!cur || cur.activityType === 'rest') return null
+  let minutes = Number(cur.travelDurationMin ?? 0) || 0
+  let mode = cur.transportMode || ''
+  let j = index + 1
+  while (j < list.length && list[j].activityType === 'rest') {
+    const r = list[j]
+    const m = Number(r.travelDurationMin ?? 0) || 0
+    minutes += m
+    if (m > 0) mode = r.transportMode || mode
+    j += 1
+  }
+  if (j >= list.length) return null
+  if (minutes <= 0) return null
+  return { mode, minutes }
+}
+
+function hasLeg(index: number): boolean {
+  return travelLeg(index) !== null
+}
+
+function legModeLabel(index: number): string {
+  const leg = travelLeg(index)
+  if (!leg) return ''
+  return TRANSPORT_LABELS[leg.mode] || leg.mode
+}
+
+function legDurationText(index: number): string {
+  const leg = travelLeg(index)
+  return leg ? formatDurationText(leg.minutes) : ''
+}
+
+/** 下一站目标下标：跳过 rest 链后的第一个同天非 rest 活动；跨天/无目标返回 -1 */
+function navTargetIndex(index: number): number {
+  const list = activities.value
+  const cur = list[index]
+  if (!cur) return -1
+  for (let j = index + 1; j < list.length; j++) {
+    const n = list[j]
+    if (Number(n.day || 1) !== Number(cur.day || 1)) return -1
+    if (n.activityType !== 'rest') return j
+  }
+  return -1
+}
+
+/** 同天下一段交通可导航（v1.22.1 分享页与时间轴一致；v1.31.0 跳过 rest 链） */
+function canNavNext(index: number): boolean {
+  return navTargetIndex(index) >= 0
 }
 
 function navNext(index: number) {
   const list = activities.value
   const cur = list[index]
-  const next = list[index + 1]
-  if (!cur || !next) return
+  const ti = navTargetIndex(index)
+  if (!cur || ti < 0) return
+  const target = list[ti]
+  const leg = travelLeg(index)
   openNavigation(
     { lat: cur.lat, lng: cur.lng, name: cur.poiName },
-    { lat: next.lat, lng: next.lng, name: next.poiName },
-    cur.transportMode,
+    { lat: target.lat, lng: target.lng, name: target.poiName },
+    (leg && leg.mode) || cur.transportMode,
   )
 }
 
@@ -204,7 +256,7 @@ function getActivityTypeLabel(type: string): string {
                   {{ formatDurationText(activity.durationMin) }}
                 </span>
                 <button
-                  v-if="activity.travelDurationMin && canNavNext(index)"
+                  v-if="hasLeg(index) && canNavNext(index)"
                   type="button"
                   class="flex items-center gap-1 cursor-pointer rounded-full px-1.5 -mx-1.5 py-0.5 transition-colors hover:bg-brand-50 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
                   :title="t('shareView.navTitle')"
@@ -213,16 +265,16 @@ function getActivityTypeLabel(type: string): string {
                   <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
                   </svg>
-                  {{ TRANSPORT_LABELS[activity.transportMode || 'transit'] || activity.transportMode }} · {{ formatDurationText(activity.travelDurationMin) }}
+                  {{ legModeLabel(index) }} · {{ legDurationText(index) }}
                 </button>
                 <span
-                  v-else-if="activity.travelDurationMin"
+                  v-else-if="hasLeg(index)"
                   class="flex items-center gap-1"
                 >
                   <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
                   </svg>
-                  {{ TRANSPORT_LABELS[activity.transportMode || 'transit'] || activity.transportMode }} · {{ formatDurationText(activity.travelDurationMin) }}
+                  {{ legModeLabel(index) }} · {{ legDurationText(index) }}
                 </span>
               </div>
 

@@ -157,7 +157,8 @@ async function applyTripStatus() {
   } else if (st === 'planning') {
     taskStatus.value = 'running'
     progress.value = Math.min(90, progress.value + 15)
-    stage.value = 'SOLVE'
+    // 进度过 75% 时示意推进到餐次校验阶段（1.31.0 CHECK_MEALS）
+    stage.value = progress.value >= 75 ? 'CHECK_MEALS' : 'SOLVE'
     stageMessage.value = t('planningPage.planningNow')
     startTripStatusPolling()
   }
@@ -175,6 +176,10 @@ function startTripStatusPolling() {
         await applyTripStatus()
       } else {
         progress.value = Math.min(95, progress.value + 3)
+        // 进度过 75% 且尚未进入收尾阶段时，示意推进到餐次校验（1.31.0 CHECK_MEALS）
+        if (progress.value >= 75 && getCurrentStageIndex() < getStageIndex('CHECK_MEALS')) {
+          stage.value = 'CHECK_MEALS'
+        }
       }
     } catch { /* ignore polling error */ }
   }, 2000)
@@ -325,6 +330,7 @@ const STAGE_KEYS = [
   'SOLVE',
   'ROUTE',
   'VERIFY_CITY',
+  'CHECK_MEALS',
   'SAVE_RESULT',
 ] as const
 
@@ -339,6 +345,8 @@ const STAGE_ALIASES: Record<string, string> = {
   ROUTE: 'ROUTE',
   CONVERT: 'ROUTE',
   VERIFY_CITY: 'VERIFY_CITY',
+  CHECK_MEALS: 'CHECK_MEALS',
+  check_meals: 'CHECK_MEALS',
   SAVE_RESULT: 'SAVE_RESULT',
   PERSIST: 'SAVE_RESULT',
   COMPLETED: 'SAVE_RESULT',
@@ -577,6 +585,7 @@ onUnmounted(() => {
                   { key: 'SOLVE', label: t('planning.stages.solve'), icon: '⚙️' },
                   { key: 'ROUTE', label: t('planning.stages.route'), icon: '🗺️' },
                   { key: 'VERIFY_CITY', label: t('planning.stages.verifyCity'), icon: '📍' },
+                  { key: 'CHECK_MEALS', label: t('planning.stages.checkMeals'), icon: '🍽️' },
                   { key: 'SAVE_RESULT', label: t('planning.stages.persist'), icon: '💾' },
                 ]"
                 :key="s.key"

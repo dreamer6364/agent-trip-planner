@@ -2180,7 +2180,9 @@ public class TripPlanningAgent {
                 this::insertRestStep,
                 (acts, ctx) -> fixTimeOverlaps(acts),
                 // 终末餐次兜底：裁剪/重排后再补一次缺失的午/晚餐（自身完成级联右推）
-                this::ensureDailyMealsStep
+                this::ensureDailyMealsStep,
+                // 餐次时间窗检查节点（1.31.0 管线末位）：存在性+窗口校验→强制修复→复验→CHECK_MEALS 汇总
+                this::checkMealWindowsStep
         );
     }
 
@@ -2208,6 +2210,100 @@ public class TripPlanningAgent {
     }
 
     /**
+     * 餐次时间窗检查节点（管线末位，1.31.0）
+     *
+     * <p>校验每天午餐/晚餐<b>存在</b>且<b>落在作息窗口</b>：午 11:00-13:30 / 晚 17:00-19:30；
+     * 首日出发已晚于右缘时退化为 15:00 / 20:00（与 {@link DailyMealPlanner} 窗口右缘
+     * {@code windowCap} 同口径）。违规走 {@link #ensureDailyMeals} 修复（缺失补入、出窗
+     * 重放，含 1.31.0 强制入窗），修复后复验；仍违规 fail-loud WARN（day/slot/时刻）。
+     * 无论是否修复都输出 {@code CHECK_MEALS} 汇总日志（见 BUGFIX 1.31.0）。</p>
+     *
+     * @param acts 全程活动（按天分组逐天校验；任何异常保留原活动）
+     */
+    private List<Map<String, Object>> checkMealWindowsStep(List<Map<String, Object>> acts, PlanningContext ctx) {
+        List<Map<String, Object>> out = acts;
+        try {
+            List<String> before = mealWindowViolations(acts, ctx.getTimeStart());
+            if (!before.isEmpty()) {
+                out = ensureDailyMeals(acts, ctx.getCity(), ctx.getMeals(),
+                        ctx.getExcludePois(), ctx.getTimeStart());
+            }
+            List<String> after = mealWindowViolations(out, ctx.getTimeStart());
+            if (!after.isEmpty()) {
+                log.warn("CHECK_MEALS: {} 处正餐时间窗违规未能修复: {}", after.size(),
+                        String.join("; ", after));
+            }
+            log.info("CHECK_MEALS: 违规 {} -> {}{}", before.size(), after.size(),
+                    before.isEmpty() ? "" : "，已修复: " + String.join("; ", before));
+            return out;
+        } catch (Exception e) {
+            log.warn("CHECK_MEALS 校验异常，保留原活动: {}", e.getMessage());
+            return out;
+        }
+    }
+
+    /** 首日日窗口下界（分钟）：max(08:00, 出发时刻)；出发时刻缺失/格式异常时按默认 08:00 */
+    private int firstDayFloor(String timeStart) {
+        int floor = DailyMealPlanner.DEFAULT_FLOOR_MIN;
+        try {
+            java.time.LocalTime dep = LocalDateTime.parse(timeStart).toLocalTime();
+            floor = Math.max(floor, dep.getHour() * 60 + dep.getMinute());
+        } catch (Exception ignore) {
+            // 出发时刻缺失/格式异常时按默认 08:00
+        }
+        return floor;
+    }
+
+    /**
+     * 正餐时间窗违规清单：如 {@code day1 午餐 15:11 出窗} / {@code day2 晚餐缺失}
+     *
+     * @return 无违规返回空列表
+     */
+    private List<String> mealWindowViolations(List<Map<String, Object>> acts, String timeStart) {
+        List<String> out = new ArrayList<>();
+        if (acts == null || acts.isEmpty()) {
+            return out;
+        }
+        int firstFloor = firstDayFloor(timeStart);
+        Map<Integer, List<Map<String, Object>>> byDay = new TreeMap<>();
+        for (Map<String, Object> a : acts) {
+            int day = toIntSafe(a.get("day"));
+            byDay.computeIfAbsent(day <= 0 ? 1 : day, k -> new ArrayList<>()).add(a);
+        }
+        for (Map.Entry<Integer, List<Map<String, Object>>> e : byDay.entrySet()) {
+            int day = e.getKey();
+            int dayFloor = day <= 1 ? firstFloor : DailyMealPlanner.DEFAULT_FLOOR_MIN;
+            for (boolean lunch : new boolean[]{true, false}) {
+                String want = lunch ? "l" : "d";
+                String slotWord = lunch ? "午餐" : "晚餐";
+                Map<String, Object> found = null;
+                for (Map<String, Object> a : e.getValue()) {
+                    if (want.equals(mealSlotOf(a))) {
+                        found = a;
+                        break;
+                    }
+                }
+                if (found == null) {
+                    out.add("day" + day + " " + slotWord + "缺失");
+                    continue;
+                }
+                int s = toMinuteOfDay(found.containsKey("startTime")
+                        ? found.get("startTime") : found.get("scheduled_start"));
+                if (s < 0) {
+                    continue;
+                }
+                // 窗口右缘与 DailyMealPlanner.windowCap 同口径：首日出发晚于右缘退化为 15:00/20:00
+                int winEnd = DailyMealPlanner.winEnd(lunch);
+                int cap = dayFloor > winEnd ? (lunch ? 15 * 60 : 20 * 60) : winEnd;
+                if (s < DailyMealPlanner.winStart(lunch) || s > cap) {
+                    out.add(String.format("day%d %s %s 出窗", day, slotWord, toHhMm(s)));
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
      * 每日午/晚餐保底（结构定稿后的最终兜底）
      *
      * <p>此前正餐丢失的根因链：LLM 漏排 → 完整性兜底补出的餐次与既有餐厅同名，
@@ -2223,6 +2319,12 @@ public class TripPlanningAgent {
      * min(原路程, 默认 15 分钟)，长路程不再把正餐顶出窗口，同时维持 REST-4 相邻
      * 不变式（见 BUGFIX 1.29.0）。</p>
      *
+     * <p>1.31.0 起窗口内无常规槽（{@link DailyMealPlanner#plan} 判空）时不再「保留原位」，
+     * 改走 {@link DailyMealPlanner#planForced} <b>强制入窗</b>：正餐仍须落在窗口右缘内
+     * （午 13:30 / 晚 19:30，首日晚出发退化为 15:00 / 20:00），级联允许越过 21:00，
+     * 当日随后调 {@link #fixTimeOverlaps} 裁掉超时尾部活动（保餐不删景，用户确认的取舍）；
+     * 强制也失败（落位时刻已晚于右缘）才 WARN 保留原位/跳过（见 BUGFIX 1.31.0）。</p>
+     *
      * @param timeStart 行程出发时刻（首日日窗口下界取 max(08:00, 出发时刻)）
      */
     private List<Map<String, Object>> ensureDailyMeals(List<Map<String, Object>> acts, String city,
@@ -2230,13 +2332,7 @@ public class TripPlanningAgent {
         if (acts == null || acts.isEmpty()) {
             return acts;
         }
-        int firstFloor = DailyMealPlanner.DEFAULT_FLOOR_MIN;
-        try {
-            java.time.LocalTime dep = LocalDateTime.parse(timeStart).toLocalTime();
-            firstFloor = Math.max(firstFloor, dep.getHour() * 60 + dep.getMinute());
-        } catch (Exception ignore) {
-            // 出发时刻缺失/格式异常时按默认 08:00
-        }
+        int firstFloor = firstDayFloor(timeStart);
 
         // 全程已用主体名（餐名与景点名都参与，防止补餐与景点同名在落库侧被剔除）
         List<String> allNames = new ArrayList<>();
@@ -2291,6 +2387,7 @@ public class TripPlanningAgent {
                 if (slot != null) slots.add(slot);
             }
             int dayFloor = day <= 1 ? firstFloor : DailyMealPlanner.DEFAULT_FLOOR_MIN;
+            boolean forcedDay = false;
 
             for (boolean lunch : new boolean[]{true, false}) {
                 String slot = lunch ? "l" : "d";
@@ -2307,13 +2404,23 @@ public class TripPlanningAgent {
                 }
                 DailyMealPlanner.Placement p = DailyMealPlanner.plan(items, lunch, dayFloor);
                 if (p == null) {
+                    // 强制入窗（1.31.0）：常规 21:00 收口无槽 → 放开级联约束重试；
+                    // 正餐仍须落在窗口右缘内，越界的尾部游览由当日末尾 fixTimeOverlaps 裁掉
+                    p = DailyMealPlanner.planForced(items, lunch, dayFloor);
+                    if (p != null) {
+                        forcedDay = true;
+                        log.warn("每日正餐保底: day{} {}餐窗口内无常规槽，强制入窗（允许级联越过 21:00）",
+                                day, lunch ? "午" : "晚");
+                    }
+                }
+                if (p == null) {
                     if (displacedMeal != null) {
                         dayActs.add(displacedMeal);
                         restored++;
-                        log.info("每日正餐保底: day{} {}餐出窗且窗口内无槽，保留原位 {}", day,
+                        log.warn("每日正餐保底: day{} {}餐出窗且强制入窗失败，保留原位 {}", day,
                                 lunch ? "午" : "晚", displacedMeal.get("startTime"));
                     } else {
-                        log.info("每日正餐保底: day{} {}餐时间不允许，跳过", day, lunch ? "午" : "晚");
+                        log.warn("每日正餐保底: day{} {}餐时间不允许，跳过", day, lunch ? "午" : "晚");
                     }
                     continue;
                 }
@@ -2397,6 +2504,12 @@ public class TripPlanningAgent {
                     dayActs.add(leftover);
                     restored++;
                 }
+            }
+            if (forcedDay) {
+                // 强制入窗当日收口（1.31.0）：级联可能把尾部活动推过 21:00，
+                // 按既定规则裁剪/截断（保餐不删景，见 fixTimeOverlaps）
+                entry.setValue(fixTimeOverlaps(dayActs));
+                log.warn("每日正餐保底: day{} 强制入窗，已按 21:00 口径收口当日尾部活动", day);
             }
         }
         if (added + rePlaced + dropped == 0) {
@@ -3108,7 +3221,9 @@ public class TripPlanningAgent {
                     }
                     starts.add(start);
                     durs.add(dur);
-                    if (over < 0 && start.plusMinutes(dur).isAfter(dayEnd)) {
+                    // 1.31.0 分钟运算判超：强制入窗级联可能把结束推过 24:00，LocalTime
+                    // plusMinutes 会回绕到次日凌晨导致 isAfter(21:00) 漏检（回绕后必然 >21:00）
+                    if (over < 0 && start.getHour() * 60 + start.getMinute() + dur > dayEnd.toSecondOfDay() / 60) {
                         over = i;
                         overMeal = meal;
                         overStart = start;
@@ -3212,37 +3327,40 @@ public class TripPlanningAgent {
      */
     private boolean pullDayLeft(List<Map<String, Object>> dayActs) {
         boolean changed = false;
-        LocalTime prevEnd = null;
+        // 1.31.0 分钟运算（可 >1439）：强制入窗级联可能把结束推过 24:00，LocalTime
+        // plusMinutes 会回绕到次日凌晨，导致后续活动被错误前拉到凌晨（回绕处封顶 23:59）
+        int prevEndMin = -1;
         int prevTravel = 0;
         for (int i = 0; i < dayActs.size(); i++) {
             Map<String, Object> a = dayActs.get(i);
             int dur = toIntSafe(a.get(durationKey(a)));
             if (dur <= 0) dur = 60;
-            LocalTime start = parseTimeSafe(String.valueOf(
+            LocalTime startT = parseTimeSafe(String.valueOf(
                     a.getOrDefault("startTime", a.getOrDefault("scheduled_start", "08:00"))));
-            LocalTime floor = (i == 0) ? LocalTime.of(8, 0) : null;
-            if (prevEnd != null) {
-                LocalTime minStart = prevEnd.plusMinutes(Math.max(0, prevTravel));
-                if (floor == null || minStart.isAfter(floor)) {
+            int start = startT.getHour() * 60 + startT.getMinute();
+            Integer floor = (i == 0) ? 8 * 60 : null;
+            if (prevEndMin >= 0) {
+                int minStart = Math.min(prevEndMin + Math.max(0, prevTravel), 24 * 60 - 1);
+                if (floor == null || minStart > floor) {
                     floor = minStart;
                 }
             }
             if (isMealActivity(a)) {
                 String name = activityName(a);
-                LocalTime winStart = null;
-                if (name.contains("早")) winStart = LocalTime.of(7, 30);
-                else if (name.contains("午")) winStart = LocalTime.of(11, 30);
-                else if (name.contains("晚")) winStart = LocalTime.of(17, 30);
-                if (winStart != null && (floor == null || winStart.isAfter(floor))) {
+                Integer winStart = null;
+                if (name.contains("早")) winStart = 7 * 60 + 30;
+                else if (name.contains("午")) winStart = 11 * 60 + 30;
+                else if (name.contains("晚")) winStart = 17 * 60 + 30;
+                if (winStart != null && (floor == null || winStart > floor)) {
                     floor = winStart;
                 }
             }
-            if (floor != null && start.isAfter(floor)) {
-                applyActivityTime(a, floor, dur);
+            if (floor != null && start > floor) {
+                applyActivityTime(a, LocalTime.of(Math.floorDiv(floor, 60), Math.floorMod(floor, 60)), dur);
                 start = floor;
                 changed = true;
             }
-            prevEnd = start.plusMinutes(dur);
+            prevEndMin = start + dur;
             prevTravel = toIntSafe(a.get("travelTimeMin"));
         }
         return changed;

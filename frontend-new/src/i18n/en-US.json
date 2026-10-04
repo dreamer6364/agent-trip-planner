@@ -157,7 +157,8 @@
       "solve": "Optimize",
       "route": "Route Plan",
       "persist": "Save Results",
-      "verifyCity": "Verify City"
+      "verifyCity": "Verify City",
+      "checkMeals": "Check Meals"
     },
     "completed": "Planning Complete",
     "failed": "Planning Failed",
@@ -344,6 +345,7 @@
       "solve": "Computing the optimal route...",
       "route": "Planning the detailed itinerary...",
       "verifyCity": "Verifying spot city attribution...",
+      "checkMeals": "Checking meal time windows...",
       "saveResult": "Saving planning results..."
     },
     "completedDesc": "Trip planning completed successfully!",

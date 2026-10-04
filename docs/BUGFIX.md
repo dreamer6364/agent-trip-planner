@@ -11,6 +11,39 @@ TripForge 的所有 Bug 修复都会记录在此文件中。
 
 ---
 
+## [1.31.0] - 2026-10-04
+
+### 修复（出窗午餐无人校验保留原位 / 跨零点回绕致 21:00 判超漏检 / 休息节点交通展示错位）
+
+- **现象**
+  1. 复现行程 `47cb48d9`（截图问题单）：day1 午餐 15:11 落在作息窗口（午 11:00-13:30）之外；`check-meals.js` 扫描近 30 天历史存量 **104 处**同类违规（午餐 >14:00、晚餐 >20:30 等）
+  2. 隐患：强制入窗级联可能把活动结束推过 24:00，`LocalTime.plusMinutes` 跨零点回绕（24:15→00:15）——`fixTimeOverlaps` 用 `isAfter(21:00)` 判超**漏检**（回绕后恒为凌晨）、`pullDayLeft` 会把后续活动**前拉到凌晨** 造成时间轴污染
+  3. 休息节点展示：休息卡显示自身携带的真实路程（「0 分钟 · 0km」类无意义信息），休息后地点的 pill 显示的是 rest 内部路程而非「休息前→休息后」直达段
+- **根因**
+  1. `DailyMealPlanner.plan()` 以 21:00 收口为硬约束，LLM 排满日必然判空；`ensureDailyMeals` 判空分支「宁缺餐不删景」直接保留原位——出窗餐从 1.29.0 出窗回收机制的「窗口内无槽原样放回」兜底中漏过，此后无任何步骤再校验（管线末位无检查节点）
+  2. 回绕：既有 `fixTimeOverlaps`/`pullDayLeft` 写于无强制级联的年代，隐含「结束 ≤ 24:00」假设；1.31.0 强制入窗放开 21:00 收口后该假设不再成立
+  3. 展示：rest 携带真实路程是 `transitDurationMin` 统计的既定依赖（REST-5 不变式），但 ActivityCard/TransitConnector/ShareView 按「相邻卡片直读」渲染，未按 rest 链聚合
+- **修复**
+  1. **强制入窗**：`DailyMealPlanner.planForced()`（窗口右缘仍硬约束，级联放开 21:00）→ `ensureDailyMeals` plan 判空后重试，`forcedDay` 当日收口调 `fixTimeOverlaps` 裁尾（截断至 21:00，放不下才移除；正餐被挤优先剔其前游览）；仍失败才 WARN 保留原位/跳过
+  2. **管线末位检查**：新增 `checkMealWindowsStep`（存在性+窗口，windowCap 同口径含首日退化 15:00/20:00），违规修复→复验→仍违规 fail-loud WARN + `CHECK_MEALS: 违规 X -> Y` 汇总；trip-service 落库侧 `MealWindowGuard` 告警双保险（仅 WARN 不拦截）
+  3. **回绕防护**：`fixTimeOverlaps` 判超改分钟运算（`start+dur > 1260`，回绕必然 >21:00 一并命中）；`pullDayLeft` 改分钟运算（prevEndMin 可 >1439）并封顶 23:59，杜绝前拉凌晨
+  4. **展示修正**（B，后端数据零改动）：`legToNext` 聚合 rest 链直达段；休息卡恒不显示交通信息；提示+pill 都放休息前（可导航），休息后 pill 隐藏；分享页同口径
+- **涉及文件**：`plan-service`（`DailyMealPlanner.java`、`TripPlanningAgent.java`）、`trip-service`（新增 `MealWindowGuard.java`、`TripService.java`、`InternalController.java`）、`frontend-new`（`activity.ts`、`ActivityCard.vue`、`DayTimeline.vue`、`ShareView.vue`）、新增 `check-meals.js`
+- **验证方式与结果（2026-10-04）**
+
+| 项 | 结果 |
+|---|---|
+| `mvn -o test` 全量 | **120/0**（新增 MealWindowEnforceTest：出窗+缺餐一次修复后 0 违规、干净输入 no-op、违规清单口径、过满日强制补双餐裁尾 ≤21:00）✅ |
+| `node verify-meals.js` | **60/0** ✅ |
+| 复现 `47cb48d9`（owner 换 admin 触发→立即恢复） | **fail=0**（原 15:11 问题行程重生成后 4 天餐次全入窗、收口 ≤21:00、无回绕）✅ |
+| `node check-meals.js`（新门禁） | 近 120 分钟新版本 **violations=0**；历史存量 104 条 INFO（证明扫描器可检出）✅ |
+| plan-service 日志 | `CHECK_MEALS 0->0` ×9、强制入窗 WARN ×4 ✅ |
+| `node verify-rest.js` | **23/0**（rest 后端不变式未回归）✅ |
+| rest 视觉核对（puppeteer-core+Edge 截图） | **11/0** + 截图人工确认详情页/分享页均符合「提示+pill 在休息前、休息卡无交通信息」✅ |
+| 前端构建部署链 | `npm run build` → robocopy → `mvn -o -q -DskipTests package` → restart，6/6 UP ✅ |
+
+---
+
 ## [1.30.0] - 2026-10-03
 
 ### 修复（景区型目的地 city 参数静默失效致全国污染 / 毒坐标级联删游览 / VERIFY_CITY 外城正餐整条剔除）

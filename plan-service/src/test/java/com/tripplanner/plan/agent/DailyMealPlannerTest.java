@@ -323,4 +323,73 @@ class DailyMealPlannerTest {
         assertThat(p.forced()).isFalse();
         // 推演：餐 17:00-18:00(+0) → 活动 18:00-20:10 不动
     }
+
+    // ===== planForced 强制入窗（1.31.0） =====
+
+    @Test
+    @DisplayName("强制入窗 - 尾部排满 21:00 - 常规判空但落位窗口内（forced）")
+    void planForced_lunch_tailFullTo2100_forcesIntoWindow() {
+        // 同 plan_lunch_tailFullTo2100_returnsNull 输入：常规模式判空，强制模式放开 21:00 收口
+        List<DailyMealPlanner.Item> items = List.of(
+                act(8 * 60, 60, 15),
+                act(9 * 60 + 15, 690, 0),
+                act(20 * 60 + 45, 15, 0));
+
+        assertThat(DailyMealPlanner.plan(items, true, FLOOR8)).isNull();
+
+        DailyMealPlanner.Placement p = DailyMealPlanner.planForced(items, true, FLOOR8);
+
+        assertThat(p).isNotNull();
+        assertThat(p.forced()).isTrue();
+        assertThat(p.index()).isEqualTo(1);
+        assertThat(p.startMin()).isEqualTo(T1130);
+        // 窗口右缘仍是硬约束：强制入窗也必须 ≤ 13:30
+        assertThat(p.startMin()).isLessThanOrEqualTo(13 * 60 + 30);
+        assertThat(p.travelMin()).isEqualTo(15);
+    }
+
+    @Test
+    @DisplayName("强制入窗 - 晚餐尾部排过 20:00 - 常规判空但强制落位 17:30")
+    void planForced_dinner_tailAfter2000_forcesIntoWindow() {
+        // 同 plan_dinner_tailAfter2000_returnsNull 输入
+        List<DailyMealPlanner.Item> items = List.of(
+                act(8 * 60, 60, 15),
+                act(9 * 60 + 15, 660, 0)); // 09:15 → 20:15
+
+        assertThat(DailyMealPlanner.plan(items, false, FLOOR8)).isNull();
+
+        DailyMealPlanner.Placement p = DailyMealPlanner.planForced(items, false, FLOOR8);
+
+        assertThat(p).isNotNull();
+        assertThat(p.forced()).isTrue();
+        assertThat(p.index()).isEqualTo(1);
+        assertThat(p.startMin()).isEqualTo(T1730);
+        assertThat(p.startMin()).isLessThanOrEqualTo(19 * 60 + 30);
+    }
+
+    @Test
+    @DisplayName("强制入窗 - 正常日 - 与 plan 结果一致（零打扰优先，不误走强制）")
+    void planForced_lunch_emptyTail_sameAsPlan() {
+        List<DailyMealPlanner.Item> items = List.of(
+                act(8 * 60, 60, 15),
+                act(9 * 60 + 15, 120, 15));
+
+        DailyMealPlanner.Placement normal = DailyMealPlanner.plan(items, true, FLOOR8);
+        DailyMealPlanner.Placement forced = DailyMealPlanner.planForced(items, true, FLOOR8);
+
+        assertThat(normal).isNotNull();
+        assertThat(forced).isNotNull();
+        assertThat(forced.index()).isEqualTo(normal.index());
+        assertThat(forced.startMin()).isEqualTo(normal.startMin());
+        assertThat(forced.forced()).isFalse();
+    }
+
+    @Test
+    @DisplayName("强制入窗 - 首日 16:00 出发（窗口右缘已过） - 仍返回 null（右缘为硬约束）")
+    void planForced_lunch_departureAfterWindowEdge_stillNull() {
+        List<DailyMealPlanner.Item> items = List.of(act(16 * 60, 120, 15));
+
+        assertThat(DailyMealPlanner.plan(items, true, 16 * 60)).isNull();
+        assertThat(DailyMealPlanner.planForced(items, true, 16 * 60)).isNull();
+    }
 }

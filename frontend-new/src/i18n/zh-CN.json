@@ -157,7 +157,8 @@
       "solve": "求解优化",
       "route": "路线规划",
       "persist": "保存结果",
-      "verifyCity": "归属验证"
+      "verifyCity": "归属验证",
+      "checkMeals": "餐次校验"
     },
     "completed": "规划完成",
     "failed": "规划失败",
@@ -344,6 +345,7 @@
       "solve": "正在计算最优路线...",
       "route": "正在规划详细行程...",
       "verifyCity": "正在校验景点城市归属...",
+      "checkMeals": "正在校验正餐时间窗...",
       "saveResult": "正在保存规划结果..."
     },
     "completedDesc": "行程规划已成功完成！",

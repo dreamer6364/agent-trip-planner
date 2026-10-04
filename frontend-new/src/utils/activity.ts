@@ -117,6 +117,81 @@ export function effectiveTravelMinutes(current: Activity, next?: Activity): numb
   return estimateTravelMinutes(activityCoord(current), activityCoord(next), current.transportMode)
 }
 
+/** 到「下一站」的展示用交通段（v1.31.0 休息节点交通展示修正） */
+export interface TravelLeg {
+  /** 交通方式：rest 链聚合时取链上真实模式（前一地点已被后端归一为 walk） */
+  mode: string
+  /** 分钟数：真实值优先，缺失按坐标估算兜底 */
+  minutes: number
+  /** 距离（km，卡片文字提示用） */
+  distanceKm: number
+  /** 距离（m，时间轴连接件用） */
+  distanceMeters: number
+  /** 直达目标下标：跳过 rest 链后的第一个非 rest 活动（相邻非 rest 时为 index+1） */
+  toIndex: number
+}
+
+/**
+ * 计算到「下一站」的交通段（v1.31.0）：
+ * - 当前项是 rest → null（休息卡不展示任何距离/时间信息）
+ * - 后继非 rest → 常规段（真实值优先，0 时按坐标估算，行为与旧版一致）
+ * - 后继是 rest 链 → 聚合直达段：insertRestNodes 把前一地点的路程归零、模式归一为
+ *   walk，真实路段由休息节点携带 → 聚合为「休息前地点 → 休息后地点」直达段
+ * - rest 链延伸到列表末尾 → null（无直达目标，不展示）
+ */
+export function legToNext(items: Activity[], index: number): TravelLeg | null {
+  const cur = items[index]
+  if (!cur || cur.activityType === 'rest') return null
+  const next = items[index + 1]
+
+  if (!next) {
+    // 尾项：无下一站，仅保留旧版「模式 + 距离（有则展示）」口径
+    const km = Number(cur.travelDistanceKm ?? 0) || 0
+    return {
+      mode: cur.transportMode || '',
+      minutes: effectiveTravelMinutes(cur),
+      distanceKm: km,
+      distanceMeters: Number(cur.travelDistanceMeters ?? 0) || Math.round(km * 1000),
+      toIndex: index + 1,
+    }
+  }
+
+  if (next.activityType !== 'rest') {
+    const km = Number(cur.travelDistanceKm ?? 0) || 0
+    return {
+      mode: cur.transportMode || '',
+      minutes: effectiveTravelMinutes(cur, next),
+      distanceKm: km,
+      distanceMeters: Number(cur.travelDistanceMeters ?? 0) || Math.round(km * 1000),
+      toIndex: index + 1,
+    }
+  }
+
+  // rest 链聚合：真实路程/模式由 rest 节点携带（见后端 buildRestActivity）
+  let minutes = 0
+  let km = 0
+  let meters = 0
+  let mode = ''
+  let j = index + 1
+  while (j < items.length && items[j].activityType === 'rest') {
+    const r = items[j]
+    const m = Number(r.travelDurationMin ?? 0) || 0
+    const rKm = Number(r.travelDistanceKm ?? 0) || 0
+    minutes += m
+    km += rKm
+    meters += Number(r.travelDistanceMeters ?? 0) || Math.round(rKm * 1000)
+    if (!mode && m > 0) mode = r.transportMode || ''
+    j += 1
+  }
+  const dest = items[j]
+  if (!dest) return null
+  if (!mode) mode = cur.transportMode || ''
+  if (minutes <= 0) {
+    minutes = estimateTravelMinutes(activityCoord(cur), activityCoord(dest), mode)
+  }
+  return { mode, minutes, distanceKm: km, distanceMeters: meters, toIndex: j }
+}
+
 /** 解析时间点：支持 "08:00"、"HH:mm:ss"、ISO datetime */
 export function formatTimePoint(value?: string | null): string {
   if (!value) return ''

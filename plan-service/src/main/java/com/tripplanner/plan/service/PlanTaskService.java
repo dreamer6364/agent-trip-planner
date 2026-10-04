@@ -233,6 +233,7 @@ public class PlanTaskService {
             case "SOLVE", "solve" -> "正在求解最优路径...";
             case "ROUTE", "route", "CONVERT" -> "正在生成路线...";
             case "VERIFY_CITY", "verify_city" -> "校验景点城市归属...";
+            case "CHECK_MEALS", "check_meals" -> "校验正餐时间窗...";
             case "PERSIST", "persist", "SAVE_RESULT" -> "正在保存结果...";
             case "COMPLETED", "completed" -> "规划完成";
             case "FAILED" -> "规划失败";

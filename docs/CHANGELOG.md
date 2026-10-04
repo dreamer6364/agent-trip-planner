@@ -11,6 +11,43 @@ TripForge 的所有重要变更都会记录在此文件中。
 
 ---
 
+## [1.31.0] - 2026-10-04
+
+### 功能（正餐时间窗强制入窗 + CHECK_MEALS 管线检查节点 + 休息交通展示修正）
+
+- **背景**：两项已批准合并实施——A：出窗午餐（复现 `47cb48d9` 午餐 15:11）根因是 LLM 排满日 `DailyMealPlanner.plan()` 判空后「保留原位」，餐次落出作息窗口无人再校验；B：rest 节点携带真实路程（统计依赖，后端语义禁止改动），但展示层把它当作「休息卡自身」与「休息后地点」的行程显示，出现 0 分钟/错位 pill。用户确认取舍：① 直达展示「提示+pill 都放休息前」；② A+B 同轮合并、同一版本号、一次部署
+- **改动 A（餐次强制入窗，plan-service/trip-service）**：
+  1. `DailyMealPlanner` 新增 `planForced()`：与 `plan()` 同候选、同窗口右缘硬约束（午 13:30/晚 19:30，首日晚出发退化 15:00/20:00），仅级联放开 21:00 收口（`planInternal(items, lunch, floor, allowOverrun)`，`tryPosition`/`cascadeFits` 同步传参）
+  2. `TripPlanningAgent.ensureDailyMeals`：`plan()` 判空 → `planForced()` 重试（WARN「强制入窗」），当日置 `forcedDay`；落位/右推后调用 `fixTimeOverlaps` 按既定规则收口裁尾（**保餐不删景**：尾部游览截断至 21:00，放不下才移除；正餐被挤出时优先剔其前游览保住正餐）；强制仍失败（落位晚于右缘）才 WARN 保留原位/跳过；首日 floor 抽取为 `firstDayFloor()`
+  3. 新增管线末位检查节点 `checkMealWindowsStep` + `mealWindowViolations`：逐天校验午餐/晚餐**存在性**与**窗口**（与 `windowCap` 同口径含首日退化），违规 → `ensureDailyMeals` 修复 → 复验 → 仍违规 fail-loud WARN；无论是否修复输出 `CHECK_MEALS: 违规 X -> Y` 汇总日志；注册于 postPipeline 末位（`ensureDailyMealsStep` 之后）
+  4. trip-service 落库侧告警守卫（新增 `MealWindowGuard`，仅 WARN 不拦截）：接入 `TripService` create/update 两处与 `InternalController` target-update/new-version 两分支，双侧防线
+  5. 进度阶段 `CHECK_MEALS(88)`：`ReplanJobConsumer` 插于 VERIFY_CITY(85)/PERSIST(90) 之间；`PlanTaskService.buildStageMessage` 加 case；前端 `PlanningPage`（STAGE_KEYS/STAGE_ALIASES/阶段列表 🍽️/applyTripStatus 轮询推进）与 `PlanningProgress`（stages/描述/别名）同步；i18n zh「餐次校验」/en「Check Meals」+ 描述文案
+  6. **回绕防护**（强制级联可能把结束推过 24:00）：`fixTimeOverlaps` 判超改分钟运算（`start+dur > 21:00`，LocalTime `plusMinutes` 跨零点回绕会漏检）；`pullDayLeft` 改分钟运算并封顶 23:59（防后续活动被回绕值前拉到凌晨）
+- **改动 B（休息交通展示，纯前端，统计/地图/导出不动）**：
+  1. `utils/activity.ts` 新增 `TravelLeg` + `legToNext()`：rest → null；相邻非 rest → 旧行为；rest 链 → **聚合直达段**（Σ rest travel、mode 取链上有意义值、分钟缺省按首尾坐标估算）
+  2. `ActivityCard`：新增 `leg` prop；`transportHint` 重构（rest 卡恒空；`leg` 提供时优先用聚合数据；未传 leg 走旧传参回退）——**休息卡无任何交通信息，提示显示「休息前 → 休息后」直达段**
+  3. `DayTimeline`：`legs` computed + `TransitConnector` 条件改 `legs[index]`——**休息前显示聚合直达 pill（可导航），休息后 pill 隐藏**
+  4. `ShareView`：`travelLeg`/`hasLeg`/`legModeLabel`/`navTargetIndex`（跳 rest 链）——分享页与时间轴同口径，rest 行无交通 chip、休息前行带聚合 chip 可导航
+- 涉及文件：`plan-service`（`agent/DailyMealPlanner.java`、`agent/TripPlanningAgent.java`、`service/PlanTaskService.java`、`test/.../DailyMealPlannerTest.java`、新增 `test/.../MealWindowEnforceTest.java`）、`trip-service`（新增 `service/MealWindowGuard.java`、`service/TripService.java`、`controller/InternalController.java`）、`planning-worker`（`consumer/ReplanJobConsumer.java`）、`frontend-new`（`utils/activity.ts`、`components/timeline/{ActivityCard,DayTimeline}.vue`、`components/share/ShareView.vue`、`views/PlanningPage.vue`、`components/planning/PlanningProgress.vue`、`i18n/{zh-CN,en-US}.json`）、新增根目录 `check-meals.js`（餐次时间窗 DB 扫描门禁）
+- 已知取舍（用户确认）：满日强制入窗后由 `fixTimeOverlaps` 裁尾（**保餐不删景**，超时尾部游览截断/移除）；强制失败 fallback 仅 WARN 保留原位不拦截；rest 后端数据语义零改动
+- 版本取舍：同一轮既有功能（A 强制入窗 + B 展示修正）又有修复（回绕防护），按主要变更类型取号，`docs/BUGFIX.md` 同为 **1.31.0**
+
+### 验证方式与结果（2026-10-04）
+
+| 项 | 结果 |
+|---|---|
+| 全量 `mvn -o test` | **120/0**（基线 112 + 新增 8：DailyMealPlannerTest 20→24、MealWindowEnforceTest 4）✅ |
+| `npm run build`（vue-tsc + vite） | EXIT=0，11.37s ✅ |
+| 部署 | stop → robocopy dist→gateway static → `mvn -o -q -DskipTests package` → start → **6/6 UP（8081-8086）** ✅ |
+| `node verify-meals.js` | **pass=60 fail=0**（4 用例全部餐次入窗、收口 ≤21:00）✅ |
+| 复现 `47cb48d9`（owner 换 admin 触发→立即恢复，动态基线） | **fail=0**：4 天午餐全入窗（11:30/13:08/12:19/11:30）、晚餐全入窗、收口 19:55/18:30/18:30/20:42、无跨零点回绕 ✅ |
+| plan-service 日志 | `CHECK_MEALS: 违规 0 -> 0` ×9；「强制入窗」WARN ×4（planForced 实际生效）；出窗重放 ×29 ✅ |
+| `node check-meals.js`（新增门禁） | 近 120 分钟新版本 **violations=0**；历史存量 104 条 INFO（含 15:11 旧违规，可检出）✅ |
+| `node verify-rest.js` | **pass=23 fail=0**（REST-1~7 全过，rest 后端语义未动）✅ |
+| rest 视觉核对 `vcheck.js`（puppeteer-core + Edge，详情页+分享页） | **pass=11 fail=0**；截图人工确认：西湖卡「至下一站·驾车15分钟·7.5km」提示与橙色直达 pill 同位于休息卡上方，休息卡（上午茶歇）无任何交通信息，分享页休息行无 chip、休息前行带 `驾车 · 15分钟` 聚合 chip ✅ |
+
+---
+
 ## [1.30.0] - 2026-10-03
 
 ### 功能增强（景区型目的地城市别名层 + 全国路候选守卫 + 跨城正餐降级保留）

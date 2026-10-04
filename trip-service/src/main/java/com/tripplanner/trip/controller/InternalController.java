@@ -7,6 +7,7 @@ import com.tripplanner.trip.entity.TripVersion;
 import com.tripplanner.trip.repository.ActivityRepository;
 import com.tripplanner.trip.repository.TripRepository;
 import com.tripplanner.trip.repository.TripVersionRepository;
+import com.tripplanner.trip.service.MealWindowGuard;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -125,6 +126,10 @@ public class InternalController {
                     }
                     tripRepository.updateById(trip);
                 }
+                // 餐次时间窗守卫（1.31.0，仅告警）：worker 落库路径不经过 plan-service postPipeline
+                MealWindowGuard.warnIfViolations(activityMaps,
+                        trip != null && trip.getTimeStart() != null ? trip.getTimeStart().toString() : null,
+                        "trip=" + tripId + ", version=" + targetVersionId);
                 log.info("内部API: 原地更新目标版本成功 tripId={}, versionId={}", tripId, targetVersionId);
                 return ResponseEntity.ok(Map.of("versionId", targetVersionId, "versionNum", target.getVersionNum()));
             }
@@ -156,6 +161,10 @@ public class InternalController {
                 tripRepository.updateById(trip);
             }
 
+            // 餐次时间窗守卫（1.31.0，仅告警）：worker 落库路径不经过 plan-service postPipeline
+            MealWindowGuard.warnIfViolations(activityMaps,
+                    trip != null && trip.getTimeStart() != null ? trip.getTimeStart().toString() : null,
+                    "trip=" + tripId + ", version=" + version.getId());
             log.info("内部API: 创建版本成功 tripId={}, versionNum={}", tripId, nextNum);
             return ResponseEntity.ok(Map.of("versionId", version.getId(), "versionNum", nextNum));
 
