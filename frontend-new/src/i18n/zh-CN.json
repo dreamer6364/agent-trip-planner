@@ -251,7 +251,17 @@
     "avatarLabel": "头像链接",
     "avatarHint": "输入图片URL设置自定义头像",
     "newPasswordPlaceholder": "请输入新密码（至少8位）",
-    "confirmPasswordPlaceholder": "请再次输入新密码"
+    "confirmPasswordPlaceholder": "请再次输入新密码",
+    "avatarPresets": "选择头像",
+    "avatarDefault": "默认头像",
+    "avatarUpload": "从磁盘上传",
+    "avatarUploading": "上传中…",
+    "avatarUploadSuccess": "头像上传成功",
+    "avatarUploadFailed": "头像上传失败，请重试",
+    "avatarTypeInvalid": "请选择有效的图片文件",
+    "avatarTooLarge": "图片大小不能超过 5MB",
+    "avatarUploadHint": "自动压缩至 256px，支持 PNG/JPG/WebP/GIF",
+    "avatarCurrent": "当前头像"
   },
   "common": {
     "confirm": "确认",

@@ -64,6 +64,8 @@ public class SecurityConfig {
                         // 公开端点
                         .requestMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login", "/api/auth/refresh").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/auth/me").permitAll() // 允许匿名访问，由过滤器处理
+                        // 头像文件公开读取（<img> 直连加载，不携带 Authorization）
+                        .requestMatchers(HttpMethod.GET, "/api/auth/avatars/**").permitAll()
                         // 跨服务公开查询：批量获取用户名（卡片作者展示）
                         .requestMatchers(HttpMethod.GET, "/api/users/names").permitAll()
                         // 文档端点

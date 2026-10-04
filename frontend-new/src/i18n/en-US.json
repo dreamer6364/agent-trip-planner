@@ -251,7 +251,17 @@
     "avatarLabel": "Avatar URL",
     "avatarHint": "Paste an image URL to set a custom avatar",
     "newPasswordPlaceholder": "Enter new password (at least 8 characters)",
-    "confirmPasswordPlaceholder": "Re-enter your new password"
+    "confirmPasswordPlaceholder": "Re-enter your new password",
+    "avatarPresets": "Choose an avatar",
+    "avatarDefault": "Default avatar",
+    "avatarUpload": "Upload from disk",
+    "avatarUploading": "Uploading…",
+    "avatarUploadSuccess": "Avatar uploaded",
+    "avatarUploadFailed": "Upload failed. Please try again",
+    "avatarTypeInvalid": "Please choose a valid image file",
+    "avatarTooLarge": "Image must be 5MB or less",
+    "avatarUploadHint": "Auto-resized to 256px, PNG/JPG/WebP/GIF",
+    "avatarCurrent": "Current avatar"
   },
   "common": {
     "confirm": "Confirm",

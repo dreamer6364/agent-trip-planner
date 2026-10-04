@@ -37,6 +37,7 @@ public class UserService implements UserDetailsService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final UserPreferenceService userPreferenceService;
+    private final AvatarStorageService avatarStorageService;
 
     @Override
     public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
@@ -115,15 +116,20 @@ public class UserService implements UserDetailsService {
      */
     public UserProfileResponse getProfile(String userId) {
         User user = findById(userId);
-        return UserProfileResponse.builder()
-                .id(user.getId())
-                .email(user.getEmail())
-                .name(user.getName())
-                .avatarUrl(user.getAvatarUrl())
-                .status(user.getStatus())
-                .lastLoginAt(user.getLastLoginAt())
-                .createdAt(user.getCreatedAt())
-                .build();
+        return buildProfile(user);
+    }
+
+    /**
+     * 落库新上传的头像 URL，并清理被替换的旧上传文件（预设/外部 URL 不在管理范围）
+     */
+    public UserProfileResponse assignAvatar(String userId, String avatarUrl) {
+        User user = findById(userId);
+        String oldAvatarUrl = user.getAvatarUrl();
+        user.setAvatarUrl(avatarUrl);
+        userRepository.updateById(user);
+        avatarStorageService.deleteIfManaged(oldAvatarUrl);
+        log.info("用户头像已更新: userId={}, {}", userId, avatarUrl);
+        return buildProfile(user);
     }
 
     /**
@@ -131,6 +137,7 @@ public class UserService implements UserDetailsService {
      */
     public UserProfileResponse updateProfile(String userId, com.tripplanner.auth.dto.request.UpdateProfileRequest request) {
         User user = findById(userId);
+        String oldAvatarUrl = user.getAvatarUrl();
         if (request.getName() != null) {
             user.setName(request.getName());
         }
@@ -138,6 +145,14 @@ public class UserService implements UserDetailsService {
             user.setAvatarUrl(request.getAvatarUrl());
         }
         userRepository.updateById(user);
+        // 头像被替换或清空时，回收旧的上传文件（形如 /api/auth/avatars/{uuid}.{ext}）
+        if (request.getAvatarUrl() != null && !request.getAvatarUrl().equals(oldAvatarUrl)) {
+            avatarStorageService.deleteIfManaged(oldAvatarUrl);
+        }
+        return buildProfile(user);
+    }
+
+    private UserProfileResponse buildProfile(User user) {
         return UserProfileResponse.builder()
                 .id(user.getId())
                 .email(user.getEmail())

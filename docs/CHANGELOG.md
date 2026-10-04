@@ -11,6 +11,64 @@ TripForge 的所有重要变更都会记录在此文件中。
 
 ---
 
+## [1.33.0] - 2026-10-04
+
+### 功能（从磁盘上传头像：multipart 上传 → 本地磁盘存储 → 公开读取 → 文件自动回收）
+
+- **背景**：1.32.0 只做了「选择」（12 预设 + 外部 URL），明确把文件上传留作后续——本轮补上用户需求「从磁盘添加头像」。全仓库无 multipart 先例，关键约束：axios 浏览器默认 **xhr 适配器**对 FormData 处理不可靠（实例默认 `application/json` 头会把 FormData 序列化掉；`AxiosHeaders`/`defaults.transformRequest` 已核源码），故上传改用**原生 fetch**
+- **改动（后端 auth-service）**：
+  1. 新增 `service/AvatarStorageService`：本地磁盘存储，目录 `app.storage.avatar-dir: ${AVATAR_DIR:${user.home}/.tripforge/avatars}`（不污染仓库）；服务端生成 UUID 文件名（客户端名不落盘）、`FILENAME_PATTERN` 白名单（UUID+png/jpe?g/webp/gif）、`root.resolve().startsWith(root)` 防路径穿越、魔数嗅探（89504E47/FFD8FF/GIF8/RIFF..WEBP）防 Content-Type 伪造、5MB 上限、空文件拒绝，非法一律 `BizException` 400；`load()` 非法/缺失返回 null；`deleteIfManaged()` 仅删除本服务 URL 格式的自有文件
+  2. 新增 `controller/AvatarController`：`POST /api/auth/me/avatar`（multipart → save → `userService.assignAvatar` 直接落库，返回完整档案；auth==null → 401）；`GET /api/auth/avatars/{filename}` 公开读取（缺失 404、`image/*`、`max-age=2592000, public, immutable`、nosniff）
+  3. `UserService`：新增 `assignAvatar(userId, url)`（更新 + `deleteIfManaged(旧)`）；`updateProfile` 变更/清空头像时回收旧上传文件；抽 `buildProfile()` 去重
+  4. 两层放行（`<img>` 直连不带 Authorization）：auth `SecurityConfig` 加 `GET /api/auth/avatars/**` permitAll；gateway `SecurityConfig` allowlist 加 `pathMatchers(HttpMethod.GET, "/api/auth/avatars/**")`；网关 `RouteConfig` `/api/auth/**` 原有路由复用
+  5. `auth-service/src/main/resources/application.yml` 加 `app.storage.avatar-dir`；新增 auth-service 首个测试 `AvatarStorageServiceTest`（10 用例：保存回环/魔数定扩展/伪图片 400/空文件 400/超限 400/load 合法与穿越与非白名单 null/回收自有与跳过外链/嗅探四格式）
+- **改动（前端）**：
+  1. `api/index.ts` 导出 `API_BASE`；`api/auth.ts` 新增 `uploadAvatar(file)`：**原生 fetch + FormData**（不走 axios），Bearer 头，401 时 `tf_refresh`→`POST /api/auth/refresh`→写回 localStorage 后重试一次，错误经 `toApiError` 归一为 `ApiError`
+  2. `AvatarPicker.vue`：新增「从磁盘上传」按钮 + 隐藏 file input（accept png/jpeg/webp/gif）；选择后前端校验（`image/*`、≤5MB）→ `canvas` 等比压缩至最长边 256px、白底合成转 JPEG q0.88（防透明变黑）→ 上传成功 toast、`emit('update:modelValue')`、**即时同步 `authStore.user.avatarUrl`**（导航栏/侧边栏无需保存即刷新）；网格新增「当前头像」格（非预设值时显示，img `@error` 自动隐藏回退）；loading 态禁用按钮；重复选同一文件可再次触发
+  3. i18n zh/en 新增 `profile.avatarUpload/avatarUploading/avatarUploadSuccess/avatarUploadFailed/avatarTypeInvalid/avatarTooLarge/avatarUploadHint/avatarCurrent` 共 8 键
+- 涉及文件：`auth-service`（新增 `service/AvatarStorageService.java`、`controller/AvatarController.java`、`test/.../AvatarStorageServiceTest.java`，改 `service/UserService.java`、`config/SecurityConfig.java`、`resources/application.yml`）、`gateway/config/SecurityConfig.java`、`frontend-new`（`api/{index,auth}.ts`、`components/ui/AvatarPicker.vue`、`i18n/{zh-CN,en-US}.json`）
+- 设计取舍：上传端点直接落库生效（无需点保存，前端 store 同步规避不一致）；替换/清空自动回收磁盘旧文件（`deleteIfManaged` 只认自有 UUID URL，预设/外部 URL 不误删）；本地磁盘存储为 v1（`AVATAR_DIR` 可外置，后续可平移对象存储）；压缩在客户端做，服务端只存不转码
+
+### 验证方式与结果（2026-10-04）
+
+| 项 | 结果 |
+|---|---|
+| 全量 `mvn -o test` | **130/0**（基线 120 + 新增 AvatarStorageServiceTest 10）✅ |
+| `npm run build`（vue-tsc + vite） | EXIT=0，2.48s ✅ |
+| 部署 | robocopy dist→gateway static(exit=3) → stop → `mvn -o -q -DskipTests package` → start → **6/6 UP（8081-8086）** ✅ |
+| `avupload.js` E2E（puppeteer-core + Edge，`page.$('input[type=file]').uploadFile`） | **pass=22 fail=0**：上传按钮/提示/file input 渲染；上传 1×1 PNG → toast + 导航栏/URL 框/头部预览三处回填 `/api/auth/avatars/{uuid}.jpg`；`/api/auth/me` 持久化；无鉴权 GET 200 + `image/jpeg` + nosniff + 30 天 immutable；刷新存活；二次上传新 UUID 且旧文件 404（服务端回收）；`.txt` 前端拦截 toast 且不落库；6MB 前端拦截 toast；伪图片/超限直连接口均 400；默认清空落库 '' 且磁盘文件 404 ✅ |
+| 截图人工核对 | `profile-upload.png`：当前头像格选中高亮、URL 回填、上传按钮+压缩提示、绿 toast「头像上传成功」、顶部头像即时同步，均符合设计 ✅ |
+| 已知说明 | `X-Content-Type-Options` 值为 `nosniff, nosniff`（gateway+auth 两层 Spring Security 默认头各自追加，系统性行为全接口一致），E2E 断言取包含式 |
+
+---
+
+## [1.32.0] - 2026-10-04
+
+### 功能（个人头像选择：12 款预设头像 + 头像渲染层全站接入）
+
+- **背景**：后端链路早已就绪（`users.avatar_url` 列 → `User.avatarUrl` → `GET/PUT /api/auth/me` → `stores/auth.ts updateProfile`），但前端 `UserAvatar` 只渲染「首字母+渐变」从不读 `avatarUrl`，导航栏/侧边栏还硬编码 `User`/`user@example.com`，头像形同虚设；资料页只有裸 URL 输入框。本次做**选择**（非上传，规避存储设计）：预设头像 + 保留自定义 URL
+- **改动**（纯前端，后端零改动，无 DDL）：
+  1. **12 款预设头像** `frontend-new/public/avatars/{fox,cat,panda,frog,penguin,bear,rabbit,lion,owl,monkey,chick,koala}.svg`：手绘扁平动物 SVG（clipPath 圆形裁切 + 渐变底），随 dist 进网关静态包，存相对路径 `/avatars/xxx.svg`
+  2. `UserAvatar.vue`：新增可选 `src` prop——有值渲染 `<img>`（`@error` 失败自动回退首字母渐变，`watch(src)` 重置失败态），所有调用点自动受益
+  3. 新增 `components/ui/AvatarPicker.vue`：「默认头像（首字母）」+ 12 预设网格（选中 ring 高亮，`grid-cols-7` 两行）+ 自定义 URL 输入（复用 UIInput）共用同一 `v-model`——选预设即回填 URL、手输 URL 自动取消预选中
+  4. `ProfilePage.vue`：URL 输入框替换为 `AvatarPicker`；头部大头像改为绑定编辑中的 `profileForm.avatarUrl` 即时预览；保存语义改为 `avatarUrl: trim()` 恒传（空串=清除自定义头像，后端 `null` 跳过/空串覆盖语义打通，原 `|| undefined` 兜底导致无法清空）
+  5. `AppNavbar.vue`：头像接 `authStore.userName` + `user.avatarUrl`（修复硬编码 `name="User"`）
+  6. `AppSidebar.vue`：同样接入真实用户名/邮箱/头像（修复硬编码 `User`/`user@example.com`）；顺手修复死链 `/settings` → `/profile`（router 无 settings 路由）
+  7. i18n zh/en 新增 `profile.avatarPresets`（选择头像/Choose an avatar）、`profile.avatarDefault`（默认头像/Default avatar）
+- 涉及文件：`frontend-new/public/avatars/*.svg`（新增12）、`src/components/layout/{UserAvatar,AppNavbar,AppSidebar}.vue`、`src/components/ui/AvatarPicker.vue`（新增）、`src/views/ProfilePage.vue`、`src/i18n/{zh-CN,en-US}.json`
+- 设计取舍：v1 只做预设+URL 选择，不做文件上传（全仓库无 multipart 上传先例、存储方案未定）；公开卡片 `authorAvatarUrl` 批量接口留作后续扩展（`UserController` 现只回昵称，网关也未配 `/api/users/**` 路由）
+
+### 验证方式与结果（2026-10-04）
+
+| 项 | 结果 |
+|---|---|
+| `npm run build`（vue-tsc + vite） | EXIT=0，18.14s，dist 含 12 张 avatars ✅ |
+| 部署 | robocopy dist→gateway static → stop → `mvn -o -q -DskipTests package` → start → **6/6 UP（8081-8086）** ✅ |
+| `avcheck.js` E2E（puppeteer-core + Edge） | **pass=13 fail=0**：12 预设渲染/默认按钮/标签/URL 框；选中 fox → 输入框与头部预览联动；保存 toast；导航栏=fox；`GET /api/auth/me` 持久化；刷新存活；默认清空后 avatarUrl='' 且导航栏回退首字母 ✅ |
+| 截图人工核对 | `profile-picker.png`（13 项网格 + SVG 观感）、`profile-saved.png`（头部/导航栏 fox 即时回显 + toast）均符合设计 ✅ |
+
+---
+
 ## [1.31.0] - 2026-10-04
 
 ### 功能（正餐时间窗强制入窗 + CHECK_MEALS 管线检查节点 + 休息交通展示修正）

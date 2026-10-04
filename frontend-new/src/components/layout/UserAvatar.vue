@@ -1,18 +1,31 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 interface Props {
   name: string
+  src?: string
   size?: 'sm' | 'md' | 'lg'
 }
 
 const props = withDefaults(defineProps<Props>(), {
   size: 'md',
+  src: undefined,
 })
+
+const imgFailed = ref(false)
+
+watch(
+  () => props.src,
+  () => {
+    imgFailed.value = false
+  },
+)
 
 const initial = computed(() => {
   return props.name?.charAt(0)?.toUpperCase() || '?'
 })
+
+const showImg = computed(() => !!props.src && !imgFailed.value)
 
 const sizeClasses = computed(() => {
   const map = {
@@ -41,11 +54,18 @@ const gradientClass = computed(() => {
 <template>
   <div
     :class="[
-      'flex items-center justify-center rounded-full bg-gradient-to-br font-semibold text-white shadow-md',
+      'flex items-center justify-center overflow-hidden rounded-full bg-gradient-to-br font-semibold text-white shadow-md',
       sizeClasses,
       gradientClass,
     ]"
   >
-    {{ initial }}
+    <img
+      v-if="showImg"
+      :src="props.src"
+      :alt="initial"
+      class="h-full w-full rounded-full object-cover"
+      @error="imgFailed = true"
+    />
+    <span v-else>{{ initial }}</span>
   </div>
 </template>

@@ -36,6 +36,8 @@ public class SecurityConfig {
                         // 公开端点
                         .pathMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .pathMatchers("/api/auth/register", "/api/auth/login", "/api/auth/refresh").permitAll()
+                        // 头像文件公开读取（<img> 直连加载，不携带 Authorization）
+                        .pathMatchers(HttpMethod.GET, "/api/auth/avatars/**").permitAll()
                         .pathMatchers("/api/trips/public", "/api/trips/public/**").permitAll()
                         .pathMatchers("/api/trips/shared/**").permitAll()
                         .pathMatchers("/api/trips/covers").permitAll()

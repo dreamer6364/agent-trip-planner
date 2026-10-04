@@ -11,6 +11,25 @@ TripForge 的所有 Bug 修复都会记录在此文件中。
 
 ---
 
+## [1.32.0] - 2026-10-04
+
+### 修复（导航栏/侧边栏硬编码用户信息、头像 URL 无法清空、侧边栏 /settings 死链）
+
+- **现象**：① 导航栏头像恒为「User」首字母、移动端侧边栏恒显示 `User` / `user@example.com`，与登录账号完全无关；② 资料页把头像链接清空后保存，服务端旧头像依旧（新选「默认头像」不生效）；③ 侧边栏「设置」项跳转 `/settings`，router 无此路由 → 白屏
+- **根因**：① `AppNavbar.vue:129` / `AppSidebar.vue:97-100` 硬编码 `name="User"` 等字面量，未接 `authStore`；② `ProfilePage.saveProfile` 用 `avatarUrl: trim() || undefined` 兜底，空串被吞成 `undefined` 不入请求，而后端 `UserService.updateProfile:137` 是 `null 才跳过`——空值永远到不了服务端；③ 侧边栏 navLinks 写死 `/settings`
+- **修复**：① 三处全部接入 `authStore.userName` / `user.email` / `user.avatarUrl`（随 1.32.0 渲染层一并生效）；② 保存改恒传 `avatarUrl: trim()`（空串覆盖清除，`null` 语义保留给「字段不参与更新」）；③ `/settings` → `/profile` 并复用 `nav.profile` 文案
+- 涉及文件：`frontend-new/src/components/layout/{AppNavbar,AppSidebar}.vue`、`src/views/ProfilePage.vue`
+- **验证方式与结果（2026-10-04）**
+
+| 项 | 结果 |
+|---|---|
+| `npm run build` | EXIT=0 ✅ |
+| 部署 | stop → package → start，**6/6 UP** ✅ |
+| `avcheck.js` E2E | **13/0**：保存后导航栏=fox、`GET /api/auth/me` 持久化、刷新存活；默认清空后 `avatarUrl=''` 且导航栏回退首字母（原 ② 号问题路径全链路通过）✅ |
+| 侧边栏死链 | 菜单项已指向 `/profile`（代码级修复，随包部署）✅ |
+
+---
+
 ## [1.31.0] - 2026-10-04
 
 ### 修复（出窗午餐无人校验保留原位 / 跨零点回绕致 21:00 判超漏检 / 休息节点交通展示错位）

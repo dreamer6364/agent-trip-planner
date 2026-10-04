@@ -11,6 +11,7 @@ import UserAvatar from '@/components/layout/UserAvatar.vue'
 import UITabs from '@/components/ui/UITabs.vue'
 import UIButton from '@/components/ui/UIButton.vue'
 import UIInput from '@/components/ui/UIInput.vue'
+import AvatarPicker from '@/components/ui/AvatarPicker.vue'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -90,7 +91,8 @@ async function saveProfile() {
   try {
     await authStore.updateProfile({
       name: profileForm.name.trim(),
-      avatarUrl: profileForm.avatarUrl.trim() || undefined,
+      // 空串 = 清除自定义头像（后端 null 跳过、空串覆盖），不能再用 || undefined 兜底
+      avatarUrl: profileForm.avatarUrl.trim(),
     })
     toast.success(t('profile.saveProfileSuccess'))
   } catch (err: unknown) {
@@ -187,6 +189,7 @@ onMounted(async () => {
         <div class="flex flex-col sm:flex-row items-center gap-6">
           <UserAvatar
             :name="authStore.user?.name || t('profile.userFallback')"
+            :src="profileForm.avatarUrl || undefined"
             size="lg"
           />
           <div class="text-center sm:text-left flex-1 min-w-0">
@@ -217,12 +220,7 @@ onMounted(async () => {
               :label="t('auth.name')"
               :placeholder="t('profile.nameRequired')"
             />
-            <UIInput
-              v-model="profileForm.avatarUrl"
-              :label="t('profile.avatarLabel')"
-              placeholder="https://example.com/avatar.jpg"
-              :hint="t('profile.avatarHint')"
-            />
+            <AvatarPicker v-model="profileForm.avatarUrl" />
             <div class="pt-2">
               <UIButton
                 variant="primary"

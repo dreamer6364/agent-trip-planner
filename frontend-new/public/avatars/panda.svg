@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#dbeafe"/><stop offset="1" stop-color="#93c5fd"/></linearGradient>
+    <clipPath id="c"><circle cx="48" cy="48" r="48"/></clipPath>
+  </defs>
+  <g clip-path="url(#c)">
+    <rect width="96" height="96" fill="url(#g)"/>
+    <circle cx="22" cy="24" r="14" fill="#1f2937"/>
+    <circle cx="74" cy="24" r="14" fill="#1f2937"/>
+    <ellipse cx="48" cy="54" rx="34" ry="30" fill="#fafafa"/>
+    <ellipse cx="35" cy="48" rx="9" ry="11" transform="rotate(-18 35 48)" fill="#1f2937"/>
+    <ellipse cx="61" cy="48" rx="9" ry="11" transform="rotate(18 61 48)" fill="#1f2937"/>
+    <circle cx="35" cy="49" r="3.5" fill="#fff"/>
+    <circle cx="61" cy="49" r="3.5" fill="#fff"/>
+    <circle cx="35.8" cy="49.8" r="1.6" fill="#1f2937"/>
+    <circle cx="61.8" cy="49.8" r="1.6" fill="#1f2937"/>
+    <ellipse cx="48" cy="63" rx="5.5" ry="4" fill="#1f2937"/>
+    <path d="M48 67 v3 M48 70 q-4.5 4 -8.5 0 M48 70 q4.5 4 8.5 0" stroke="#1f2937" stroke-width="2" fill="none" stroke-linecap="round"/>
+    <circle cx="27" cy="64" r="5" fill="#fda4af" opacity="0.6"/>
+    <circle cx="69" cy="64" r="5" fill="#fda4af" opacity="0.6"/>
+  </g>
+</svg>

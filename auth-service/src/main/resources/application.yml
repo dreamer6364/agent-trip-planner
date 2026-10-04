@@ -67,6 +67,11 @@ rate-limit:
   default-qps: 100
   auth-qps: 10
 
+# avatar storage (disk)
+app:
+  storage:
+    avatar-dir: ${AVATAR_DIR:${user.home}/.tripforge/avatars}
+
 # Actuator & 监控
 management:
   endpoints:

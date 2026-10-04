@@ -2,7 +2,7 @@ import axios, { type AxiosInstance, type InternalAxiosRequestConfig } from 'axio
 import i18n from '@/i18n'
 import type { ApiResponse } from './types'
 
-const API_BASE = import.meta.env.VITE_API_BASE || ''
+export const API_BASE = import.meta.env.VITE_API_BASE || ''
 
 const instance: AxiosInstance = axios.create({
   baseURL: API_BASE,

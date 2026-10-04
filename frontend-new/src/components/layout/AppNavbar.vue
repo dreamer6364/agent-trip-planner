@@ -126,7 +126,11 @@ function handleLogout() {
               class="flex items-center gap-2 rounded-xl p-1.5 transition-all hover:bg-gray-100"
               @click="userDropdownOpen = !userDropdownOpen"
             >
-              <UserAvatar name="User" size="sm" />
+              <UserAvatar
+                :name="authStore.userName || t('profile.userFallback')"
+                :src="authStore.user?.avatarUrl || undefined"
+                size="sm"
+              />
             </button>
 
             <!-- User Dropdown -->

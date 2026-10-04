@@ -24,7 +24,7 @@ const navLinks = computed(() => [
   { label: t('nav.dashboard'), to: '/dashboard', icon: '📊' },
   { label: t('nav.newTrip'), to: '/trips/new', icon: '✨' },
   { label: t('nav.myTrips'), to: '/trips', icon: '🗺️' },
-  { label: t('nav.settings'), to: '/settings', icon: '⚙️' },
+  { label: t('nav.profile'), to: '/profile', icon: '👤' },
 ])
 
 function navigate(to: string) {
@@ -94,10 +94,18 @@ function handleLogout() {
               <!-- User Info -->
               <div class="border-b border-gray-100 px-6 py-4">
                 <div class="flex items-center gap-3">
-                  <UserAvatar name="User" size="md" />
+                  <UserAvatar
+                    :name="authStore.userName || t('profile.userFallback')"
+                    :src="authStore.user?.avatarUrl || undefined"
+                    size="md"
+                  />
                   <div>
-                    <p class="text-sm font-semibold text-gray-900">User</p>
-                    <p class="text-xs text-gray-500">user@example.com</p>
+                    <p class="text-sm font-semibold text-gray-900">
+                      {{ authStore.userName || t('profile.userFallback') }}
+                    </p>
+                    <p class="text-xs text-gray-500">
+                      {{ authStore.user?.email || '' }}
+                    </p>
                   </div>
                 </div>
               </div>
