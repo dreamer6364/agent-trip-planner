@@ -19,7 +19,7 @@ public enum TripPace {
 
     COMPACT("compact", "紧凑", 8, 10, 4, 6),
     MODERATE("moderate", "适中", 6, 8, 3, 5),
-    RELAXED("relaxed", "宽松", 3, 5, 2, 3);
+    RELAXED("relaxed", "宽松", 3, 5, 3, 4);
 
     /** 对外/接口使用的编码 */
     private final String code;

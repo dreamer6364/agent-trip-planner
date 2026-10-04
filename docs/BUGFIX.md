@@ -11,6 +11,50 @@ TripForge 的所有 Bug 修复都会记录在此文件中。
 
 ---
 
+## [1.30.0] - 2026-10-03
+
+### 修复（景区型目的地 city 参数静默失效致全国污染 / 毒坐标级联删游览 / VERIFY_CITY 外城正餐整条剔除）
+
+- **现象**（E2E 实锤，1.29.0 收尾遗留）
+  - 长白山 2 日 relaxed：餐饮检索返回北京西单店（「悦融琥珀·京鲁菜(西单店)」）、商场/购物返回太原/长沙等全国结果；`geocode 长白山风景区` 返回新疆哈密毒坐标 (92.5,41.9)；北坡→天池 301km/320min、天池→晚餐 4207km 毒路线；最终 **day2 恒 2 游览且缺午餐**（`verify-meals` 19:50 部署前批 caseB d2 FAIL：no lunch + idle 145min）
+  - 长春 `47cb48d9` day3/4 残留 10-01 20:01 旧版本数据（上轮遗留，待根因修复后重生成）
+- **根因**（高德直调实测，脚本证据 `amap-test.txt`/`amap-test2.txt`）
+  1. `rest?city=长白山&citylimit=true` → `count=1000` **全国结果**——高德不识别「长白山」为行政区，citylimit **静默失效**，POI/餐饮/交通检索全部失去城市过滤
+  2. `geocode?address=长白山风景区` → 新疆毒坐标；`GeocodeService.CITY_CENTERS` 无长白山 → `center==null` → `resultCityMatches` 直接 `return true` 放行 → **跨城裁决完全关闭**
+  3. 毒坐标 → 路网异常 → `fixTimeOverlaps` 21:00 级联每轮删掉 day2 最后一个游览（长白山/黄山/燕莎）→ 游览数恒 2
+  4. `TripService.verifyCityOwnership` 对**跨城餐直接剔除** → 西单店午餐消失
+  5. **节奏侧共因**：`TripPace.RELAXED` 景点数区间为 **2~3**（minVisits=2）——21:00 级联删到 2 个游览后 `visitCount < minVisits` 恒为 false，`belowPaceFloor` 判「已达标」**保底填充永不触发**，每日 2 游览被固化
+- **修复**：
+  1. **城市别名层**（新增 `AmapCityAlias`）：`长白山 → 安图县`（行政区实测覆盖北坡/聚龙温泉/长白山风景区，二道白河镇 geocode 亦归安图县）+ `radiusKm` 区域半径（长白山 120km，其余回退调用方默认值）
+  2. `GeocodeService`：`CITY_CENTERS` 补长白山锚点 {42.05, 128.05}——恢复 150km 跨城裁决与「未知区域名回落中心坐标」兜底；`callAmapGeocode` / `callAmapPlace` 的 city 参数统一走别名
+  3. `PoiSearchService`：`queryLoose` / `searchOne` city 走别名；`filterByDistance` 阈值改 `AmapCityAlias.radiusKm(city, MAX_DISTANCE_KM)`；新增 `NATIONAL_GUARD_KM=150` + `withinRadius()`——**全国路候选守卫**：先 `resolveCityCenter` 再按城市半径过滤交通候选（citylimit 失效时兜底）
+  4. `RestaurantSearchService.queryPois`、`RouteService.callAmapTransit` city 走别名（共 5 处调用点）
+  5. `TripService.verifyCityOwnership` 重写：跨城 **visit 仍剔除**；跨城 **meal 降级不删**（新 `degradeForeignMeal`：名称截到首个 `·` 前成通用餐次，清除 lat/lng/address/rating/cost 等异地细节）；「剔除过多」判定仅按剔除的 visit 计（`rejected*2 > checked`）；仅降级时记日志 `VERIFY_CITY 降级外城餐厅为通用餐次`
+  6. **节奏下限**：`TripPace.RELAXED` 景点数 2~3 → **3~4**（minVisits 2→3，使保底填充在 2 游览时可触发）；前端 i18n `relaxedVisits` 文案同步 zh「约 3~4 个景点」/ en 对应项，`npm run build` + robocopy 后随包部署
+- 涉及文件：
+  - `plan-service`：`service/AmapCityAlias.java`（新增）、`service/GeocodeService.java`、`service/PoiSearchService.java`、`service/RestaurantSearchService.java`、`service/RouteService.java`、`constant/TripPace.java`、`src/test/.../service/AmapCityAliasTest.java`（新增 5 例）
+  - `trip-service`：`service/TripService.java`、`src/test/.../service/TripServiceVerifyCityTest.java`（新增 4 例）
+  - `frontend-new/src/i18n/zh-CN.json`、`frontend-new/src/i18n/en-US.json`
+
+### 已知问题（非本轮回归，未在本轮修复）
+
+- **caseC（北京 3 日 compact）day2 visits=2 < compact 下限 4**：`assert-d3d4` 报 FAIL。版本史实测 **10-01 22:23 起多轮复现**（d2:v2 与 d2:v4 并存的 LLM 方差）——八达岭 5h + 颐和园 3h 占满日程且日内最大空窗 74min < `fillDayGaps` 触发阈值 120min → 保底填充不触发。建议后续：景点数未达 `minVisits` 时把空窗阈值降档（如 ≥60min）再插入。
+
+### 验证方式与结果（2026-10-03）
+
+| 项 | 结果 |
+|---|---|
+| `mvn -o -q compile -pl plan-service,trip-service -am` | exit=0 ✓ |
+| `mvn -o -q test`（全量） | **112 tests / 0 failures / 0 errors**（103 基线 + 新增 9；定向 `-pl` 单跑曾因本地仓库 common-module 旧包误报，reactor 全量复跑全绿）✓ |
+| `node verify-meals.js`（杭州3d / 长白山2d / 北京3d / 成都2d） | **pass=60 fail=0**（19:50 部署前批 caseB d2 无午餐 FAIL → 20:49-20:54 部署后批 4 用例 10 天全过）✓ |
+| caseB 长白山修复前后对比 | 19:50 `d1:v3 d2:v2 无午餐` → 20:52 `d1:v3 d2:v3 午餐·东北菜 / 晚餐·长白山美食`，餐次与景点全部本地 ✓ |
+| 长春 `47cb48d9` 重生成 | owner 临时切 admin（`11111111…`）触发 `POST /plan` → **立即恢复原属主 `c18e1c05…`**；新版本 `e8015e5b` 2026-10-03 21:00:19，`assert-trips` acts=24 **OK / FAIL=0**（替换掉 10-01 20:01 旧数据）✓ |
+| `assert-d3d4`（4h 窗口） | FAIL=3 = 部署前旧批 2 条（caseB 无午餐/caseC 旧数据，部署后新批已不再出现）+ caseC 已知问题 1 条；**部署后新批 A/B/D 全 OK**、仅 caseC（见已知问题）✓ |
+| 部署回归 | stop → `mvn -o -q -DskipTests package` → start → 6/6 UP（8081-8086）✓ |
+| 前端（RELAXED 文案） | `npm run build` → `robocopy frontend-new\dist gateway\...static /MIR` → `mvn -o package -DskipTests` → restart 已于本轮完成，`relaxedVisits` 新文案随网关静态包下发 ✓ |
+
+---
+
 ## [1.29.0] - 2026-10-01
 
 ### 修复（正餐落出作息窗口 / 21:00 收口删餐 / 落库餐次误判 / 跨城数据污染）

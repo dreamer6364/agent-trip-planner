@@ -284,10 +284,11 @@ public class GeocodeService {
 
     private GeocodeResponse callAmapGeocode(String query, String city) {
         try {
+            String amapCity = AmapCityAlias.toAmapCity(city);
             String url = mapApiConfig.getAmapGeocodeUrl()
                     + "?key=" + mapApiConfig.getAmapApiKey()
                     + "&address=" + java.net.URLEncoder.encode(query, java.nio.charset.StandardCharsets.UTF_8)
-                    + "&city=" + java.net.URLEncoder.encode(city != null ? city : "", java.nio.charset.StandardCharsets.UTF_8)
+                    + "&city=" + java.net.URLEncoder.encode(amapCity != null ? amapCity : "", java.nio.charset.StandardCharsets.UTF_8)
                     + "&output=JSON";
             throttleAmap();
             Map<String, Object> response = amapWebClient.get()
@@ -310,12 +311,13 @@ public class GeocodeService {
      */
     private GeocodeResponse callAmapPlace(String query, String city) {
         try {
+            String amapCity = AmapCityAlias.toAmapCity(city);
             String url = mapApiConfig.getAmapPlaceUrl()
                     + "?key=" + mapApiConfig.getAmapApiKey()
                     + "&keywords=" + java.net.URLEncoder.encode(query, java.nio.charset.StandardCharsets.UTF_8)
-                    + (city == null || city.isBlank()
+                    + (amapCity == null || amapCity.isBlank()
                             ? ""
-                            : "&city=" + java.net.URLEncoder.encode(city, java.nio.charset.StandardCharsets.UTF_8))
+                            : "&city=" + java.net.URLEncoder.encode(amapCity, java.nio.charset.StandardCharsets.UTF_8))
                     + "&citylimit=true&offset=5&page=1&output=JSON";
             throttleAmap();
             Map<String, Object> response = amapWebClient.get()
@@ -813,6 +815,9 @@ public class GeocodeService {
         CITY_CENTERS.put("乌鲁木齐", new double[]{43.8256, 87.6168});
         CITY_CENTERS.put("长春", new double[]{43.8171, 125.3235});
         CITY_CENTERS.put("大连", new double[]{38.9140, 121.6147});
+        // 景区型区域（非高德行政城市）：锚点=长白山景区中心，启用 150km 跨城裁决，
+        // 拦截「长白山风景区 -> 新疆哈密」类全国检索毒坐标（BUGFIX 1.30.0）
+        CITY_CENTERS.put("长白山", new double[]{42.05, 128.05});
     }
 
     /** 城市名 -> 市中心坐标（API 失效时用于地图居中；仅 query 本身为城市名时命中） */

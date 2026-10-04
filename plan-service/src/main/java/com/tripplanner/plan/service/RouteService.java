@@ -184,7 +184,7 @@ public class RouteService {
                     + "?key=" + mapApiConfig.getAmapApiKey()
                     + "&origin=" + oLng + "," + oLat
                     + "&destination=" + dLng + "," + dLat
-                    + "&city=" + java.net.URLEncoder.encode(city, java.nio.charset.StandardCharsets.UTF_8)
+                    + "&city=" + java.net.URLEncoder.encode(AmapCityAlias.toAmapCity(city), java.nio.charset.StandardCharsets.UTF_8)
                     + "&output=JSON";
             throttleAmap();
             Map<String, Object> response = amapWebClient.get()

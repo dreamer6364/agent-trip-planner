@@ -11,6 +11,34 @@ TripForge 的所有重要变更都会记录在此文件中。
 
 ---
 
+## [1.30.0] - 2026-10-03
+
+### 功能增强（景区型目的地城市别名层 + 全国路候选守卫 + 跨城正餐降级保留）
+
+- **背景**：1.29.0 收尾遗留两项——① 长白山 relaxed 每日仅 2 游览、缺午餐；② 长春 `47cb48d9` day3/4 残留旧数据。共同根因是高德不把「长白山」识别为行政区：citylimit 静默失效 → 全国污染 + 新疆毒坐标 → 21:00 级联删游览；跨城裁决因 `CITY_CENTERS` 无锚点而放行；`VERIFY_CITY` 又把外城餐厅整条删除（详见 `docs/BUGFIX.md` 1.30.0）
+- **改动**：
+  1. **城市别名层**（新增 `AmapCityAlias`）：`长白山 → 安图县` + 区域半径 120km；地理编码 / POI / 餐饮 / 交通检索共 **5 处调用点**的 city 参数统一走别名
+  2. `GeocodeService.CITY_CENTERS` 补长白山锚点 {42.05, 128.05}：恢复 150km 跨城裁决与中心坐标兜底（此前 `center==null` 直接放行）
+  3. `PoiSearchService` 新增**全国路候选守卫**（`NATIONAL_GUARD_KM=150` + `withinRadius()`）：citylimit 失效时交通候选仍按城市半径过滤；`filterByDistance` 阈值改用区域半径
+  4. `TripService.verifyCityOwnership`：跨城餐厅**降级为通用餐次保留**（截名 + 清除异地坐标/地址/评分），不再删除正餐；跨城景点仍剔除；剔除过多判定仅计景点
+  5. `TripPace.RELAXED` 景点数区间 2~3 → **3~4**（minVisits 2→3：此前 2 游览即「达标」，21:00 级联后保底填充不触发）；前端 i18n `relaxedVisits` 文案同步（zh/en），已 build + robocopy 随网关静态包部署
+  6. 长春 `47cb48d9` 用修复后管线重生成（owner 临时切 admin 触发 `POST /plan`，完成后立即恢复原属主）
+- 涉及文件：`plan-service`：`service/AmapCityAlias.java`（新增）、`service/GeocodeService.java`、`service/PoiSearchService.java`、`service/RestaurantSearchService.java`、`service/RouteService.java`、`constant/TripPace.java`、`src/test/.../service/AmapCityAliasTest.java`（新增）；`trip-service`：`service/TripService.java`、`src/test/.../service/TripServiceVerifyCityTest.java`（新增）；`frontend-new/src/i18n/zh-CN.json`、`en-US.json`
+- 版本取号：同一轮以修复为主、附带检索/裁决增强，与 `docs/BUGFIX.md` 同为 **1.30.0**
+
+### 验证方式与结果（2026-10-03）
+
+| 项 | 结果 |
+|---|---|
+| 全量单测 `mvn -o -q test` | **112/0**（103 基线 + 新增 9：AmapCityAliasTest 5、TripServiceVerifyCityTest 4）✓ |
+| `node verify-meals.js` | **pass=60 fail=0**——caseB 长白山补回午餐且每日 3 游览（部署前 d2 无午餐 FAIL）✓ |
+| `assert-trips` 长春 `47cb48d9` 重生成版 | 新版 `e8015e5b` 21:00:19，acts=24 **OK / FAIL=0** ✓ |
+| `assert-d3d4`（4h 窗口） | 部署后新批 A/B/D 全 OK；caseC d2 visits=2 为 10-01 起已知 LLM 方差问题（见 BUGFIX 1.30.0 已知问题）✓ |
+| 构建部署 | stop → `mvn -o -q -DskipTests package` → start → **6/6 UP（8081-8086）** ✓ |
+| 前端（RELAXED 文案） | `npm run build` → robocopy → `mvn -o package -DskipTests` → restart 已完成，`relaxedVisits` 新文案随包下发 ✓ |
+
+---
+
 ## [1.29.0] - 2026-10-01
 
 ### 功能增强（行程空闲填充扩容 + 每日正餐保障闭环）

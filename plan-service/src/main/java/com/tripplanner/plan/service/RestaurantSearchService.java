@@ -187,7 +187,7 @@ public class RestaurantSearchService {
         String url = mapApiConfig.getAmapPlaceUrl()
                 + "?key=" + mapApiConfig.getAmapApiKey()
                 + "&keywords=" + encode(keywords)
-                + "&city=" + encode(city)
+                + "&city=" + encode(AmapCityAlias.toAmapCity(city))
                 + "&citylimit=true"
                 + "&types=" + encode("050000")
                 + "&offset=" + MAX_RESULTS

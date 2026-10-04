@@ -49,6 +49,9 @@ public class PoiSearchService {
     private static final int MAX_CACHE_SIZE = 200;
     private static final double MAX_DISTANCE_KM = 20.0;
 
+    /** 全国路候选的跨城守卫半径（与 GeocodeService B10 裁决半径一致） */
+    private static final double NATIONAL_GUARD_KM = 150.0;
+
     /** 每城市查询计划：目标类型 + 关键词（逗号多关键词非 OR，故按类别分次查询） */
     private record QueryPlan(String type, String keyword) {
     }
@@ -187,8 +190,13 @@ public class PoiSearchService {
         mergeFuture(merged, cityRoad, true, kw, 0);
         // 全国原词路：单字查询高德全国返回 count=0，不空耗请求
         if (hasCity && kw.length() >= 2) {
+            // 全国路只做错别字/简称兜底：结果须落在目标城市半径内，否则即跨城污染
+            // （BUGFIX 1.30.0：city=长白山 高德限域失效时全国商场/景点混入候选池）
+            double[] guardCenter = resolveCityCenter(cityOrNull);
+            double guardKm = AmapCityAlias.radiusKm(cityOrNull, NATIONAL_GUARD_KM);
             CompletableFuture<List<Map<String, Object>>> nationalRoad =
-                    CompletableFuture.supplyAsync(() -> queryLoose(kw, null), poiExecutor);
+                    CompletableFuture.supplyAsync(
+                            () -> withinRadius(queryLoose(kw, null), guardCenter, guardKm), poiExecutor);
             mergeFuture(merged, nationalRoad, false, kw, 0);
         }
 
@@ -367,7 +375,7 @@ public class PoiSearchService {
                 + "&keywords=" + encode(keyword)
                 + "&offset=10&page=1");
         if (city != null && !city.isBlank()) {
-            url.append("&city=").append(encode(city)).append("&citylimit=true");
+            url.append("&city=").append(encode(AmapCityAlias.toAmapCity(city))).append("&citylimit=true");
         }
         try {
             Map<String, Object> response = amapWebClient.get()
@@ -464,7 +472,7 @@ public class PoiSearchService {
         String url = mapApiConfig.getAmapPlaceUrl()
                 + "?key=" + mapApiConfig.getAmapApiKey()
                 + "&keywords=" + encode(keyword)
-                + "&city=" + encode(city)
+                + "&city=" + encode(AmapCityAlias.toAmapCity(city))
                 + "&citylimit=true"
                 + "&offset=" + MAX_RESULTS_PER_QUERY
                 + "&page=1";
@@ -621,17 +629,18 @@ public class PoiSearchService {
         if (center == null) {
             return pois;
         }
+        double maxKm = AmapCityAlias.radiusKm(city, MAX_DISTANCE_KM);
         List<Map<String, Object>> out = new ArrayList<>();
         for (Map<String, Object> poi : pois) {
             double lat = ((Number) poi.get("lat")).doubleValue();
             double lng = ((Number) poi.get("lng")).doubleValue();
-            if (haversineKm(center[0], center[1], lat, lng) <= MAX_DISTANCE_KM) {
+            if (haversineKm(center[0], center[1], lat, lng) <= maxKm) {
                 out.add(poi);
             }
         }
         if (out.size() != pois.size()) {
             log.info("POI 距离过滤: city={}, {} -> {} 条 (阈值 {}km)",
-                    city, pois.size(), out.size(), MAX_DISTANCE_KM);
+                    city, pois.size(), out.size(), maxKm);
         }
         return out;
     }
@@ -646,6 +655,28 @@ public class PoiSearchService {
             log.debug("城市中心地理编码失败: {}, {}", city, e.getMessage());
         }
         return null;
+    }
+
+    /** 半径守卫：中心未知或候选缺坐标时原样放行，超出半径的外地候选剔除 */
+    private List<Map<String, Object>> withinRadius(List<Map<String, Object>> items,
+                                                   double[] center, double radiusKm) {
+        if (center == null || items == null || items.isEmpty()) {
+            return items;
+        }
+        List<Map<String, Object>> out = new ArrayList<>(items.size());
+        for (Map<String, Object> item : items) {
+            Object lat = item.get("lat");
+            Object lng = item.get("lng");
+            if (!(lat instanceof Number) || !(lng instanceof Number)) {
+                out.add(item);
+                continue;
+            }
+            if (haversineKm(center[0], center[1],
+                    ((Number) lat).doubleValue(), ((Number) lng).doubleValue()) <= radiusKm) {
+                out.add(item);
+            }
+        }
+        return out;
     }
 
     private double haversineKm(double lat1, double lng1, double lat2, double lng2) {

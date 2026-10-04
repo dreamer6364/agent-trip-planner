@@ -954,42 +954,82 @@ public class TripService {
     }
 
     /**
-     * VERIFY_CITY: 过滤明确属于其他城市的 visit 景点，并重排 seq
+     * VERIFY_CITY: 过滤明确属于其他城市的 visit 景点，并重排 seq。
+     *
+     * <p>外城餐厅（如「午餐·XX(西单店)」在长白山行程）不整条剔除：正餐槽位必须
+     * 每日保留（缺午餐破坏用餐兜底），改为清掉餐厅专名与异地坐标降级为通用餐次
+     * （BUGFIX 1.30.0）；跨城 visit 仍剔除。</p>
      */
     private List<Map<String, Object>> verifyCityOwnership(
             List<Map<String, Object>> activities, String city, String tripId) {
         if (activities == null || city == null || city.isBlank()) {
             return activities;
         }
-        var result = com.tripplanner.common.util.CityOwnershipUtils.filterActivitiesForCity(
-                activities,
-                act -> String.valueOf(act.getOrDefault("poi_name", act.getOrDefault("name", ""))),
-                act -> String.valueOf(act.getOrDefault("activity_type", act.getOrDefault("type", "visit"))),
-                city
-        );
-        if (result.rejected().isEmpty()) {
-            log.info("VERIFY_CITY 通过: tripId={}, city={}, visitTotal={}",
-                    tripId, city, result.visitTotal());
-            return activities;
-        }
-        if (result.isOverwhelmed()) {
-            throw new IllegalStateException(
-                    "规划结果景点城市归属校验失败: 目标城市=" + city
-                            + ", 剔除=" + result.rejectedSummary());
-        }
-        log.warn("VERIFY_CITY 剔除跨城景点: tripId={}, city={}, rejected={}, visitTotal={}",
-                tripId, city, result.rejectedSummary(), result.visitTotal());
-
-        List<Map<String, Object>> filtered = new ArrayList<>();
+        List<Map<String, Object>> out = new ArrayList<>();
+        List<String> rejected = new ArrayList<>();
+        List<String> degradedMeals = new ArrayList<>();
+        int checked = 0;
         int seq = 1;
-        for (Map<String, Object> act : result.kept()) {
+        for (Map<String, Object> act : activities) {
+            String type = String.valueOf(act.getOrDefault("activity_type", act.getOrDefault("type", "visit")));
+            String name = String.valueOf(act.getOrDefault("poi_name", act.getOrDefault("name", "")));
+            boolean isTransport = "transit".equals(type) || "buffer".equals(type)
+                    || "transport".equals(type) || "rest".equals(type);
             Map<String, Object> copy = new java.util.LinkedHashMap<>(act);
             copy.put("id", "act" + seq);
             copy.put("seq", seq);
-            filtered.add(copy);
+            if (!isTransport && !name.isBlank()) {
+                checked++;
+                if (!com.tripplanner.common.util.CityOwnershipUtils.belongsToCity(name, city)) {
+                    if ("meal".equals(type)) {
+                        degradeForeignMeal(copy, name);
+                        degradedMeals.add(name);
+                    } else {
+                        rejected.add(name);
+                        continue;
+                    }
+                }
+            }
+            out.add(copy);
             seq++;
         }
-        return filtered;
+        if (rejected.isEmpty() && degradedMeals.isEmpty()) {
+            log.info("VERIFY_CITY 通过: tripId={}, city={}, visitTotal={}",
+                    tripId, city, checked);
+            return activities;
+        }
+        if (checked > 0 && rejected.size() * 2 > checked) {
+            throw new IllegalStateException(
+                    "规划结果景点城市归属校验失败: 目标城市=" + city
+                            + ", 剔除=" + String.join("、", rejected));
+        }
+        if (!degradedMeals.isEmpty()) {
+            log.warn("VERIFY_CITY 降级外城餐厅为通用餐次: tripId={}, city={}, meals={}",
+                    tripId, city, String.join("、", degradedMeals));
+        }
+        if (!rejected.isEmpty()) {
+            log.warn("VERIFY_CITY 剔除跨城景点: tripId={}, city={}, rejected={}, visitTotal={}",
+                    tripId, city, String.join("、", rejected), checked);
+        }
+        return out;
+    }
+
+    /**
+     * 外城餐厅降级：只留「午餐/晚餐」餐次名，清掉外城餐厅的描述与坐标，
+     * 避免行程里出现异地餐厅名与异地地图钉。
+     */
+    private void degradeForeignMeal(Map<String, Object> act, String name) {
+        int dot = name.indexOf('·');
+        String slot = dot > 0 ? name.substring(0, dot).trim() : "餐食";
+        if (slot.isEmpty()) {
+            slot = "餐食";
+        }
+        act.put("name", slot);
+        act.put("poi_name", slot);
+        for (String key : new String[]{"description", "address", "lat", "lng",
+                "latitude", "longitude", "location", "rating", "cost"}) {
+            act.remove(key);
+        }
     }
 
     /**
