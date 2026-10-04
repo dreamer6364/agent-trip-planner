@@ -73,7 +73,8 @@ public class TripService {
         trip.setTransportMode(request.getTransportMode());
         trip.setPace(normalizePace(request.getPace()));
         trip.setPreferences(jsonUtils.toJson(request.getPreferences()));
-        trip.setStatus("planning");
+        boolean saveAsDraft = "draft".equalsIgnoreCase(request.getStatus());
+        trip.setStatus(saveAsDraft ? "draft" : "planning");
         trip.setViewCount(0);
 
         tripRepository.insert(trip);
@@ -83,7 +84,13 @@ public class TripService {
         trip.setCurrentVersionId(version.getId());
         tripRepository.updateById(trip);
 
-        // 3. 执行 AI Agent 规划 (调用 plan-service)
+        // 3. 草稿模式：保存即止，不触发 AI 规划（后续可经规划入口发起）
+        if (saveAsDraft) {
+            log.info("行程已保存为草稿: tripId={}", trip.getId());
+            return toResponse(trip);
+        }
+
+        // 4. 执行 AI Agent 规划 (调用 plan-service)
         try {
             log.info("开始 AI Agent 规划: tripId={}", trip.getId());
             

@@ -334,7 +334,8 @@
     "toasts": {
       "createSuccess": "Trip created! AI has generated your full itinerary",
       "timeout": "AI planning timed out. Retry later from the trip details",
-      "createFailed": "Failed to create the trip, please try again"
+      "createFailed": "Failed to create the trip, please try again",
+      "draftSuccess": "Saved as draft. Start planning anytime from your trip list"
     }
   },
   "parseSummary": {
@@ -469,7 +470,8 @@
     "endTime": "End time",
     "titlePlaceholder": "Give your trip a name (optional)",
     "planning": "AI planning...",
-    "startPlan": "Start AI Planning"
+    "startPlan": "Start AI Planning",
+    "saveDraft": "Save as draft"
   },
   "tripStats": {
     "totalDuration": "Total time",

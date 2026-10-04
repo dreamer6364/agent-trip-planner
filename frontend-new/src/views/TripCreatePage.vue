@@ -32,6 +32,23 @@ const handleSubmit = (formData: CreateTripRequest) => {
   showPlanIntro.value = true
 }
 
+/** 保存为草稿：跳过 AI 规划确认弹窗，直接落库 draft，返回列表（1.34.0） */
+const handleSaveDraft = async (formData: CreateTripRequest) => {
+  if (isSubmitting.value) return
+  isSubmitting.value = true
+  try {
+    await tripStore.createTrip({ ...formData, status: 'draft' })
+    toast.success(t('tripCreate.toasts.draftSuccess'))
+    router.push('/dashboard')
+  } catch (error: unknown) {
+    console.error('Failed to save draft:', error)
+    const msg = error instanceof Error ? error.message : ''
+    toast.error(msg || t('tripCreate.toasts.createFailed'))
+  } finally {
+    isSubmitting.value = false
+  }
+}
+
 const handleIntroClose = () => {
   if (isSubmitting.value) return
   showPlanIntro.value = false
@@ -87,6 +104,7 @@ const handlePlanConfirm = async () => {
           <div class="bg-white rounded-2xl shadow-sm p-8">
             <TripForm
               @submit="handleSubmit"
+              @draft="handleSaveDraft"
               :loading="isSubmitting"
             />
           </div>

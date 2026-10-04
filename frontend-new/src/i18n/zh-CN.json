@@ -334,7 +334,8 @@
     "toasts": {
       "createSuccess": "行程创建成功！AI 已生成完整行程",
       "timeout": "AI 规划超时，请稍后在行程详情中重试",
-      "createFailed": "创建失败，请重试"
+      "createFailed": "创建失败，请重试",
+      "draftSuccess": "已保存为草稿，可随时从行程列表开始规划"
     }
   },
   "parseSummary": {
@@ -469,7 +470,8 @@
     "endTime": "结束时间",
     "titlePlaceholder": "为你的行程起个名字（可选）",
     "planning": "AI 规划中...",
-    "startPlan": "开始智能规划"
+    "startPlan": "开始智能规划",
+    "saveDraft": "保存为草稿"
   },
   "tripStats": {
     "totalDuration": "总时长",

@@ -23,6 +23,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   submit: [data: CreateTripRequest]
+  draft: [data: CreateTripRequest]
 }>()
 
 const form = reactive<TripFormData>({
@@ -59,8 +60,8 @@ watch(() => props.initialData, (val) => {
   }
 }, { deep: true })
 
-function handleSubmit() {
-  if (!form.rawInput.trim() || !form.timeStart || !form.timeEnd) return
+function buildPayload(): CreateTripRequest | null {
+  if (!form.rawInput.trim() || !form.timeStart || !form.timeEnd) return null
   const payload: CreateTripRequest = {
     title: form.title || t('tripForm.defaultTitle'),
     rawInput: form.rawInput,
@@ -73,7 +74,19 @@ function handleSubmit() {
   if (city) {
     payload.city = city
   }
+  return payload
+}
+
+function handleSubmit() {
+  const payload = buildPayload()
+  if (!payload) return
   emit('submit', payload)
+}
+
+function handleSaveDraft() {
+  const payload = buildPayload()
+  if (!payload) return
+  emit('draft', payload)
 }
 
 function setToday() {
@@ -223,29 +236,50 @@ function setTomorrow() {
       </div>
     </div>
 
-    <button
-      type="submit"
-      :disabled="loading || !form.rawInput.trim() || !form.timeStart || !form.timeEnd"
-      :class="[
-        'relative w-full py-3 px-6 rounded-xl font-semibold text-white transition-all duration-300 overflow-hidden',
-        loading || !form.rawInput.trim() || !form.timeStart || !form.timeEnd
-          ? 'bg-surface-300 dark:bg-surface-600 cursor-not-allowed'
-          : 'bg-gradient-to-r from-brand-600 to-accent-600 hover:from-brand-700 hover:to-accent-700 shadow-lg shadow-brand-500/25 hover:shadow-xl hover:shadow-brand-500/30 active:scale-[0.98]'
-      ]"
-    >
-      <span v-if="loading" class="absolute inset-0 flex items-center justify-center bg-brand-600/80">
-        <svg class="animate-spin h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-        </svg>
-        <span class="ml-2">{{ t('tripForm.planning') }}</span>
-      </span>
-      <span v-else class="flex items-center justify-center gap-2">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-        </svg>
-        {{ t('tripForm.startPlan') }}
-      </span>
-    </button>
+    <div class="flex flex-col sm:flex-row gap-3">
+      <button
+        type="submit"
+        :disabled="loading || !form.rawInput.trim() || !form.timeStart || !form.timeEnd"
+        :class="[
+          'relative flex-1 py-3 px-6 rounded-xl font-semibold text-white transition-all duration-300 overflow-hidden',
+          loading || !form.rawInput.trim() || !form.timeStart || !form.timeEnd
+            ? 'bg-surface-300 dark:bg-surface-600 cursor-not-allowed'
+            : 'bg-gradient-to-r from-brand-600 to-accent-600 hover:from-brand-700 hover:to-accent-700 shadow-lg shadow-brand-500/25 hover:shadow-xl hover:shadow-brand-500/30 active:scale-[0.98]'
+        ]"
+      >
+        <span v-if="loading" class="absolute inset-0 flex items-center justify-center bg-brand-600/80">
+          <svg class="animate-spin h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          <span class="ml-2">{{ t('tripForm.planning') }}</span>
+        </span>
+        <span v-else class="flex items-center justify-center gap-2">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+          {{ t('tripForm.startPlan') }}
+        </span>
+      </button>
+
+      <button
+        type="button"
+        :disabled="loading || !form.rawInput.trim() || !form.timeStart || !form.timeEnd"
+        :class="[
+          'flex-1 py-3 px-6 rounded-xl font-semibold transition-all duration-300',
+          loading || !form.rawInput.trim() || !form.timeStart || !form.timeEnd
+            ? 'bg-surface-100 dark:bg-surface-800 text-surface-400 cursor-not-allowed'
+            : 'bg-surface-100 dark:bg-surface-800 text-surface-700 dark:text-surface-300 hover:bg-surface-200 dark:hover:bg-surface-700 active:scale-[0.98]'
+        ]"
+        @click="handleSaveDraft"
+      >
+        <span class="flex items-center justify-center gap-2">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+          </svg>
+          {{ t('tripForm.saveDraft') }}
+        </span>
+      </button>
+    </div>
   </form>
 </template>

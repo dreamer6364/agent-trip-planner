@@ -43,6 +43,12 @@ public class CreateTripRequest {
 
     private List<PlaceInput> places; // 可选：结构化地点列表
 
+    /**
+     * 可选创建模式："draft"=仅保存草稿（不触发 AI 规划）；缺省或其他值=完整规划流程。
+     * 草稿后续可经 POST /{id}/plan 或规划页发起规划。
+     */
+    private String status;
+
     @Data
     public static class PlaceInput {
         private String name;

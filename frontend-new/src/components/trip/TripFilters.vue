@@ -27,7 +27,6 @@ const currentStatus = computed({
 const statusOptions = computed(() => [
   { value: 'all', label: t('dashboard.filterAll'), color: 'bg-surface-100 text-surface-700 dark:bg-surface-700 dark:text-surface-300', activeColor: 'bg-brand-500 text-white shadow-glow' },
   { value: 'draft', label: t('dashboard.filterDraft'), color: 'bg-surface-100 text-surface-600 dark:bg-surface-700 dark:text-surface-400', activeColor: 'bg-surface-600 text-white' },
-  { value: 'planning', label: t('dashboard.filterPlanning'), color: 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400', activeColor: 'bg-blue-500 text-white shadow-lg shadow-blue-500/25' },
   { value: 'completed', label: t('dashboard.filterCompleted'), color: 'bg-success-50 text-success-600 dark:bg-success-900/30 dark:text-success-400', activeColor: 'bg-success-500 text-white shadow-lg shadow-success-500/25' },
 ])
 </script>

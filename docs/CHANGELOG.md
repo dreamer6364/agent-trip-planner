@@ -11,6 +11,35 @@ TripForge 的所有重要变更都会记录在此文件中。
 
 ---
 
+## [1.34.0] - 2026-10-04
+
+### 功能（行程草稿：新建页一键存草稿跳过 AI 规划 + 列表移除「规划中」筛选）
+
+- **背景**：`draft` 状态基础设施早已就位（`TripStatusBadge` 草稿徽章、i18n `filterDraft`/`tripStatus.draft`、列表 `?status=` 过滤、`POST /{id}/plan` 再规划入口），但 `TripService.createTrip` 硬编码 `status="planning"` 并立即触发 AI 规划——用户无法先把行程存下来稍后再规划；同时筛选栏「规划中」项按用户要求移除
+- **改动（后端 trip-service）**：
+  1. `CreateTripRequest` 新增可选 `status` 字段：`"draft"`（大小写不敏感）= 仅保存草稿
+  2. `TripService.createTrip`：`status=draft` 时 `trip.status="draft"`，创建 Trip + 初始版本后 **early return 跳过全部 AI 规划**（解析/生成/内联回退均不触碰，`planServiceClient`/`inlinePlanner` 零交互）；缺省值保持原完整规划流程（planning → completed/failed），非 draft 路径零改动
+  3. 草稿后续出路复用既有链路：详情页「更多 → 重新规划」或直接进 `/trips/:id/planning`，`PlanningPage.initPlanning` 对无任务的非 planning 行程自动 `triggerNewPlan()`（PlanningPage.vue:99-101，既有逻辑）
+- **改动（前端）**：
+  1. `TripForm.vue`：抽出 `buildPayload()`，新增 `draft` 事件与**「保存为草稿」次按钮**（与主按钮「开始智能规划」并排 `flex sm:flex-row`，共用必填校验/loading 禁用；草稿按钮灰色描边样式，主按钮渐变不变）
+  2. `TripCreatePage.vue`：`@draft="handleSaveDraft"`——绕过 `AIPlanIntroModal` 确认弹窗直接 `createTrip({...form, status:'draft'})` → toast「已保存为草稿，可随时从行程列表开始规划」→ 跳转 `/dashboard`
+  3. `TripFilters.vue`：**移除「规划中」筛选项**（筛选栏 = 全部/草稿/已完成）；`dashboard.filterPlanning` i18n key 保留（Dashboard「继续行程」chip 仍引用）
+  4. `api/types.ts` `CreateTripRequest` 加 `status?: string`；i18n zh/en 新增 `tripForm.saveDraft`、`tripCreate.toasts.draftSuccess`
+- 涉及文件：`trip-service`（`dto/request/CreateTripRequest.java`、`service/TripService.java`、新增 `test/.../TripServiceCreateDraftTest.java`）、`frontend-new`（`components/trip/{TripForm,TripFilters}.vue`、`views/TripCreatePage.vue`、`api/types.ts`、`i18n/{zh-CN,en-US}.json`）
+- 设计取舍：草稿仅跳过规划、不跳过初始版本创建（后续规划直接复用 rawInput/parsedInput 链路）；「规划中」只删筛选 tab，`planning` 状态本身保留（进行中行程徽章/轮询不受影响）；已存在 planning 状态的行程在「全部」中照常展示
+
+### 验证方式与结果（2026-10-04）
+
+| 项 | 结果 |
+|---|---|
+| 全量 `mvn -o test` | **133/0**（基线 130 + 新增 TripServiceCreateDraftTest 3：draft 跳过规划零交互/大小写不敏感/缺省走完整规划至 completed）✅ |
+| `npm run build`（vue-tsc + vite） | EXIT=0，2.46s ✅ |
+| 部署 | robocopy dist→gateway static(exit=3) → stop → `mvn -o -q -DskipTests package` → start → **6/6 UP（8081-8086）** ✅ |
+| `draftcheck.js` E2E（puppeteer-core + Edge，`/plan` 请求拦截 abort 不实跑） | **pass=21 fail=0**：双按钮渲染；填表点「保存为草稿」→ toast + 跳 `/dashboard`（未弹 AI 确认弹窗）；卡片带「草稿」徽章；列表/详情接口 `status=draft`；筛选栏=全部/草稿/已完成（**无「规划中」**）；点「草稿」触发 `status=draft` 过滤请求且目标卡片在、无「已完成」徽章；草稿详情页可打开、更多菜单含「重新规划」；草稿进规划页自动发起 `POST /plan`（已拦截）；DELETE 清理无残留 ✅ |
+| 截图人工核对 | `draft-create.png`：底部并排「开始智能规划」（渐变主按钮）+「保存为草稿」（灰色次按钮）；`draft-dashboard.png`：筛选栏仅 全部/草稿/已完成、草稿卡片右上「草稿」徽章、绿色 toast 文案正确 ✅ |
+
+---
+
 ## [1.33.0] - 2026-10-04
 
 ### 功能（从磁盘上传头像：multipart 上传 → 本地磁盘存储 → 公开读取 → 文件自动回收）

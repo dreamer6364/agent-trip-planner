@@ -159,6 +159,8 @@ export interface CreateTripRequest {
     preferredDurationMin?: number
     notes?: string
   }>
+  /** 创建模式：'draft'=仅保存草稿（不触发 AI 规划），缺省走完整规划（1.34.0） */
+  status?: string
 }
 
 export interface UpdateTripRequest {
