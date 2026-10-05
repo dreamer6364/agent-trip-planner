@@ -27,9 +27,9 @@ class MealWindowEnforceTest {
     private List<Map<String, Object>> ensure(List<Map<String, Object>> acts, String city, String timeStart)
             throws Exception {
         Method m = TripPlanningAgent.class.getDeclaredMethod("ensureDailyMeals",
-                List.class, String.class, List.class, List.class, String.class);
+                List.class, String.class, List.class, List.class, String.class, List.class);
         m.setAccessible(true);
-        return (List<Map<String, Object>>) m.invoke(agent, acts, city, null, null, timeStart);
+        return (List<Map<String, Object>>) m.invoke(agent, acts, city, null, null, timeStart, null);
     }
 
     @SuppressWarnings("unchecked")

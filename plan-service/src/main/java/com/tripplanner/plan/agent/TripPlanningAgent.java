@@ -59,6 +59,12 @@ public class TripPlanningAgent {
     /** 城市餐厅库: name, lat, lng, tags(逗号分隔口味), type=restaurant */
     private static final Map<String, List<Map<String, Object>>> CITY_RESTAURANTS = new HashMap<>();
 
+    /**
+     * 餐点坐标可信阈值（km）：餐点与同日前后锚点（有坐标的活动）都超过该距离，
+     * 判定为「串到别的城市」的坐标，需以上一景点为圆心重新检索（1.35.0）。
+     */
+    private static final double MEAL_COORD_TRUST_KM = 60.0;
+
     /** 用户可能表达的口味/菜系关键词 */
     private static final List<String> FOOD_KEYWORDS = List.of(
             "火锅", "川菜", "湘菜", "粤菜", "杭帮菜", "苏帮菜", "鲁菜", "闽菜", "徽菜",
@@ -1320,7 +1326,11 @@ public class TripPlanningAgent {
     }
 
     /**
-     * 按口味 + 与上一地点距离挑选具体餐厅。
+     * 按与上一地点距离（主）+ 口味（次）挑选具体餐厅。
+     *
+     * <p>1.35.0 起距离优先：有参考点时最近的候选胜出（口味差只折算 1.5km），
+     * 无参考点时退回口味匹配优先。</p>
+     *
      * @param prevLat 上一活动纬度（可 null）
      * @param prevLng 上一活动经度（可 null）
      */
@@ -1351,8 +1361,10 @@ public class TripPlanningAgent {
                         ((Number) rest.get("lat")).doubleValue(),
                         ((Number) rest.get("lng")).doubleValue());
             }
-            // 口味匹配大幅加分；距离越近分越低
-            double score = dist + (tagMatch ? 0 : 50000);
+            // 距离优先（1.35.0）：口味匹配只折算成 1.5km 的距离优势——
+            // 就近是首要目标，口味只在「差不多近」的候选之间起作用；
+            // 此前 50000（≈50km）的口味惩罚会让「远处合口味」压过「近处不合口味」
+            double score = dist + (tagMatch ? 0 : 1500);
             if (score < bestScore) {
                 bestScore = score;
                 best = rest;
@@ -1388,10 +1400,16 @@ public class TripPlanningAgent {
      * </ul>
      * 仅在目标城市已知时发起在线查询（防跨城检索）。失败静默降级，不影响主流程。
      *
+     * <p>1.35.0 就近修正：参考点（上一活动）坐标缺失时回退 {@link #estimateCoord}
+     * 本地缓存，保证周边检索始终以「上一景点」为圆心；跨天时重置参考点，
+     * 防止把第二天的餐厅锚到前一天的城市。</p>
+     *
      * @param activities 已定稿活动列表（结构不再变化）
      * @param city       目标城市
+     * @param places     预处理景点列表（参考点本地坐标回退，可为 null）
      */
-    private List<Map<String, Object>> annotateMealRestaurants(List<Map<String, Object>> activities, String city) {
+    private List<Map<String, Object>> annotateMealRestaurants(List<Map<String, Object>> activities, String city,
+                                                              List<Map<String, Object>> places) {
         if (activities == null || activities.isEmpty()) {
             return activities;
         }
@@ -1402,9 +1420,21 @@ public class TripPlanningAgent {
         Set<String> usedRestaurantNames = new HashSet<>();
         Double prevLat = null;
         Double prevLng = null;
+        Integer prevDay = null;
         int annotated = 0;
         int upgraded = 0;
-        for (Map<String, Object> act : activities) {
+        List<Map<String, Object>> ordered = new ArrayList<>(activities);
+        ordered.sort(Comparator
+                .comparingInt((Map<String, Object> a) -> toIntSafe(a.getOrDefault("day", 1)))
+                .thenComparing(a -> String.valueOf(a.getOrDefault("startTime",
+                        a.getOrDefault("scheduled_start", "00:00")))));
+        for (Map<String, Object> act : ordered) {
+            int day = toIntSafe(act.getOrDefault("day", 1));
+            if (prevDay != null && day != prevDay) {
+                prevLat = null;
+                prevLng = null;
+            }
+            prevDay = day;
             String type = String.valueOf(act.getOrDefault("type", act.getOrDefault("activity_type", "visit")));
             if ("meal".equals(type)) {
                 String rawName = String.valueOf(act.getOrDefault("name", act.getOrDefault("poi_name", "")));
@@ -1456,10 +1486,17 @@ public class TripPlanningAgent {
                     }
                 }
             }
-            // 记录当前活动坐标作为下一段参考点
-            if (act.get("lat") != null && act.get("lng") != null) {
-                prevLat = ((Number) act.get("lat")).doubleValue();
-                prevLng = ((Number) act.get("lng")).doubleValue();
+            // 记录当前活动坐标作为下一段参考点；坐标缺失时回退本地缓存（不发 API）
+            double[] ref = null;
+            if (act.get("lat") instanceof Number && act.get("lng") instanceof Number) {
+                ref = new double[]{((Number) act.get("lat")).doubleValue(),
+                        ((Number) act.get("lng")).doubleValue()};
+            } else {
+                ref = estimateCoord(nameOfActivity(act), city, places);
+            }
+            if (ref != null) {
+                prevLat = ref[0];
+                prevLng = ref[1];
             }
         }
         log.info("餐段注解完成: city={}, 餐段注解 {} 个, 泛化升级 {} 个", city, annotated, upgraded);
@@ -2141,6 +2178,8 @@ public class TripPlanningAgent {
      * 其后的裁剪/重排（rest 插入、收口修复）可能挤掉正餐，补餐自身完成级联右推，
      * 不依赖后续 fixTimeOverlaps；同时回收被填充/修正顺延出作息窗口的既有正餐
      * （见 CHANGELOG/BUGFIX 1.29.0）。
+     * correctMealLegsStep 必须位于最末（1.35.0）：它用真实路网改写餐段 travel，
+     * 任何后续步骤（补餐/窗口修复）都会再次覆盖为旅行切分估算值。
      */
     private List<ActivityStep> postPipeline() {
         return List.<ActivityStep>of(
@@ -2165,7 +2204,7 @@ public class TripPlanningAgent {
                 // 每日正餐保底：只要时间允许，每一天必须有午餐+晚餐（本步之后不再有去重步骤）
                 this::ensureDailyMealsStep,
                 // 餐厅注解（静态坐标 + 在线评分/人均/地址）
-                (acts, ctx) -> annotateMealRestaurants(acts, ctx.getCity()),
+                (acts, ctx) -> annotateMealRestaurants(acts, ctx.getCity(), ctx.getPlaces()),
                 // 换版排除硬清洗（非换版 no-op；须在真实路网修正前）
                 this::enforceVariantStep,
                 // 真实路网修正 → 人性化校准 → 餐次兜底 → 时间重叠修复
@@ -2182,7 +2221,11 @@ public class TripPlanningAgent {
                 // 终末餐次兜底：裁剪/重排后再补一次缺失的午/晚餐（自身完成级联右推）
                 this::ensureDailyMealsStep,
                 // 餐次时间窗检查节点（1.31.0 管线末位）：存在性+窗口校验→强制修复→复验→CHECK_MEALS 汇总
-                this::checkMealWindowsStep
+                this::checkMealWindowsStep,
+                // 餐段真实路网补正（1.35.0）：结构与窗口定稿后，用真实路网校正补餐/出窗重放
+                // 写入的旅行切分估算值；距离直接采纳，时间会让正餐出窗时回退（须在所有会改写
+                // travel 的步骤之后，否则会被再次覆盖）
+                this::correctMealLegsStep
         );
     }
 
@@ -2202,7 +2245,7 @@ public class TripPlanningAgent {
     private List<Map<String, Object>> ensureDailyMealsStep(List<Map<String, Object>> acts, PlanningContext ctx) {
         try {
             return ensureDailyMeals(acts, ctx.getCity(), ctx.getMeals(),
-                    ctx.getExcludePois(), ctx.getTimeStart());
+                    ctx.getExcludePois(), ctx.getTimeStart(), ctx.getPlaces());
         } catch (Exception e) {
             log.warn("每日正餐保底失败，保留原活动: {}", e.getMessage());
             return acts;
@@ -2213,7 +2256,7 @@ public class TripPlanningAgent {
      * 餐次时间窗检查节点（管线末位，1.31.0）
      *
      * <p>校验每天午餐/晚餐<b>存在</b>且<b>落在作息窗口</b>：午 11:00-13:30 / 晚 17:00-19:30；
-     * 首日出发已晚于右缘时退化为 15:00 / 20:00（与 {@link DailyMealPlanner} 窗口右缘
+     * 首日出发已晚于右缘时退化为 14:00 / 20:00（与 {@link DailyMealPlanner} 窗口右缘
      * {@code windowCap} 同口径）。违规走 {@link #ensureDailyMeals} 修复（缺失补入、出窗
      * 重放，含 1.31.0 强制入窗），修复后复验；仍违规 fail-loud WARN（day/slot/时刻）。
      * 无论是否修复都输出 {@code CHECK_MEALS} 汇总日志（见 BUGFIX 1.31.0）。</p>
@@ -2226,7 +2269,7 @@ public class TripPlanningAgent {
             List<String> before = mealWindowViolations(acts, ctx.getTimeStart());
             if (!before.isEmpty()) {
                 out = ensureDailyMeals(acts, ctx.getCity(), ctx.getMeals(),
-                        ctx.getExcludePois(), ctx.getTimeStart());
+                        ctx.getExcludePois(), ctx.getTimeStart(), ctx.getPlaces());
             }
             List<String> after = mealWindowViolations(out, ctx.getTimeStart());
             if (!after.isEmpty()) {
@@ -2240,6 +2283,290 @@ public class TripPlanningAgent {
             log.warn("CHECK_MEALS 校验异常，保留原活动: {}", e.getMessage());
             return out;
         }
+    }
+
+    /**
+     * 餐段真实路网补正步骤（管线末位，1.35.0）
+     *
+     * <p><b>根因</b>：终末 {@code ensureDailyMealsStep}（补餐/出窗重放）位于 correctStep
+     * 之后，写入的是「旅行切分」估算值（上一段路程收缩为 ≤15 分钟、距离按
+     * 0.067 km/min 折算），其后没有任何步骤再用真实路网校正——餐段距离/时间与实际
+     * 严重不符（宁夏案例：上一景点 → 餐厅 144km，却显示 15 分钟 / 1 公里）。</p>
+     *
+     * <p><b>做法</b>：结构与餐次窗口全部定稿后，逐天对跨餐段的相邻锚点（有坐标的活动）
+     * 用真实路网重算 travelTimeMin / travelDistanceKm / transportToNext；坐标可信度不足
+     * 的餐点（距同日前后锚点都超过 {@value #MEAL_COORD_TRUST_KM} km，即串到了别的城市）
+     * 先以邻近景点为圆心就地重定位。距离是地理事实直接采纳；时间是排程约束——采纳后
+     * 若让正餐被推出作息窗口，只回退时间、保留真实距离，1.31.0/1.34.1 的餐窗口径不变。</p>
+     *
+     * @param acts 全程活动（任何异常保留原活动）
+     */
+    private List<Map<String, Object>> correctMealLegsStep(List<Map<String, Object>> acts, PlanningContext ctx) {
+        try {
+            return correctMealLegs(acts, ctx.getCity(), ctx.getTimeStart());
+        } catch (Exception e) {
+            log.warn("餐段路程补正失败，保留原结果: {}", e.getMessage());
+            return acts;
+        }
+    }
+
+    /**
+     * 餐段真实路网补正：按天扫描 → 餐点坐标重定位 → 选段 → 并行算路 → 落值 → 时间轴收口。
+     *
+     * @param activities 全程活动
+     * @param city       规划城市
+     * @param timeStart  出发时刻（餐窗口违规基线比对用）
+     * @return 修正后的活动列表（无需修正时原样返回）
+     */
+    private List<Map<String, Object>> correctMealLegs(List<Map<String, Object>> activities, String city,
+                                                      String timeStart) {
+        if (activities == null || activities.size() < 2 || city == null || city.isBlank()) {
+            return activities;
+        }
+        List<String> before = mealWindowViolations(activities, timeStart);
+
+        Map<Integer, List<Map<String, Object>>> byDay = new TreeMap<>();
+        for (Map<String, Object> a : activities) {
+            int day = toIntSafe(a.get("day"));
+            byDay.computeIfAbsent(day <= 0 ? 1 : day, k -> new ArrayList<>()).add(a);
+        }
+
+        List<MealLeg> candidates = new ArrayList<>();
+        int repaired = 0;
+        int untrustedCount = 0;
+        for (List<Map<String, Object>> dayActs : byDay.values()) {
+            dayActs.sort(Comparator.comparing(a -> String.valueOf(
+                    a.getOrDefault("startTime", a.getOrDefault("scheduled_start", "08:00")))));
+            List<Integer> anchors = new ArrayList<>();
+            for (int i = 0; i < dayActs.size(); i++) {
+                if (coordOfActivity(dayActs.get(i)) != null) {
+                    anchors.add(i);
+                }
+            }
+            if (anchors.size() < 2) {
+                continue;
+            }
+
+            // 1) 餐点坐标重定位：与同日前后锚点都超限 → 串城坐标，就地重新检索
+            Set<Map<String, Object>> untrusted = Collections.newSetFromMap(new IdentityHashMap<>());
+            for (int i = 0; i < dayActs.size(); i++) {
+                Map<String, Object> meal = dayActs.get(i);
+                if (!isMealActivity(meal) || coordOfActivity(meal) == null) {
+                    continue;
+                }
+                int prevIdx = anchorBefore(anchors, i);
+                int nextIdx = anchorAfter(anchors, i);
+                double[] prevC = prevIdx >= 0 ? coordOfActivity(dayActs.get(prevIdx)) : null;
+                double[] nextC = nextIdx >= 0 ? coordOfActivity(dayActs.get(nextIdx)) : null;
+                double prevKm = straightKm(prevC, coordOfActivity(meal));
+                double nextKm = straightKm(coordOfActivity(meal), nextC);
+                boolean farPrev = prevC == null || prevKm > MEAL_COORD_TRUST_KM;
+                boolean farNext = nextC == null || nextKm > MEAL_COORD_TRUST_KM;
+                if (!(farPrev && farNext)) {
+                    continue;
+                }
+                double[] ref = prevC != null ? prevC : nextC;
+                double[] fixed = repairMealCoord(meal, ref, city);
+                if (fixed != null) {
+                    meal.put("lat", fixed[0]);
+                    meal.put("lng", fixed[1]);
+                    repaired++;
+                    log.info("餐点坐标重定位: {} ({}, {}) -> ({}, {})", nameOfActivity(meal),
+                            round2(prevKm), round2(nextKm), fixed[0], fixed[1]);
+                } else {
+                    untrusted.add(meal);
+                    untrustedCount++;
+                    log.warn("餐点坐标不可信且重定位失败: {} 距前/后锚点 {}/{}km，跳过该餐段补正",
+                            nameOfActivity(meal), round2(prevKm), round2(nextKm));
+                }
+            }
+
+            // 2) 选段：任一端是餐、两锚点相邻、坐标可信，且现有里程与直线估算明显不符。
+            //    travelTimeMin 语义是「到下一个活动的路程」（见 correctActivitiesWithRealData），
+            //    所以承载体必须是起点 from；只处理相邻锚点，避免把直连路程写给中间还有
+            //    其他活动的起点。
+            for (int k = 0; k + 1 < anchors.size(); k++) {
+                int fromIdx = anchors.get(k);
+                int toIdx = anchors.get(k + 1);
+                if (toIdx != fromIdx + 1) {
+                    continue;
+                }
+                Map<String, Object> from = dayActs.get(fromIdx);
+                Map<String, Object> to = dayActs.get(toIdx);
+                if (!isMealActivity(from) && !isMealActivity(to)) {
+                    continue;
+                }
+                if (untrusted.contains(from) || untrusted.contains(to)) {
+                    continue;
+                }
+                Map<String, Object> carrier = from;
+                double km = straightKm(coordOfActivity(from), coordOfActivity(to));
+                if (!mealLegNeedsRoute(carrier, km)) {
+                    continue;
+                }
+                candidates.add(new MealLeg(coordOfActivity(from), coordOfActivity(to), from, to, carrier));
+            }
+        }
+
+        if (candidates.isEmpty()) {
+            log.debug("餐段路程补正: 无待修正餐段 (city={})", city);
+            return activities;
+        }
+
+        // 3) 并行真实路网查询（RouteService 带 Redis 缓存，重复行程零成本）
+        List<CompletableFuture<Map<String, Object>>> futures = new ArrayList<>(candidates.size());
+        for (MealLeg leg : candidates) {
+            futures.add(CompletableFuture.supplyAsync(
+                    () -> findBestRoute(leg.fromC(), leg.toC(), city), planExecutor));
+        }
+
+        // 4) 落值（记录旧时间以便窗口回退）
+        int changed = 0;
+        boolean pushed = false;
+        List<Object[]> snapshots = new ArrayList<>();
+        for (int i = 0; i < candidates.size(); i++) {
+            MealLeg leg = candidates.get(i);
+            Map<String, Object> route = futures.get(i).join();
+            if (route == null || routeLooksPoisoned(route)) {
+                log.warn("餐段路程补正: {}→{} 无可用真实路线，保留原值",
+                        nameOfActivity(leg.from()), nameOfActivity(leg.to()));
+                continue;
+            }
+            Map<String, Object> carrier = leg.carrier();
+            int oldTime = toIntSafe(carrier.get("travelTimeMin"));
+            int newTime = toIntSafe(route.get("time"));
+            snapshots.add(new Object[]{carrier, oldTime});
+            carrier.put("travelTimeMin", newTime);
+            carrier.put("travelDistanceKm", Math.round(((Number) route.get("dist")).doubleValue() * 10.0) / 10.0);
+            carrier.put("transportToNext", route.get("mode"));
+            if (newTime > oldTime) {
+                pushed = true;
+            }
+            changed++;
+            log.info("餐段路程补正: {}→{} {}min {}km {}",
+                    nameOfActivity(leg.from()), nameOfActivity(leg.to()),
+                    newTime, route.get("dist"), route.get("mode"));
+        }
+        if (changed == 0) {
+            return activities;
+        }
+        if (!pushed) {
+            // 只缩短/等值：时间轴无需重排，距离与时间直接生效
+            log.info("餐段路程补正完成: 修正 {} 段（仅距离/时间缩短），坐标重定位 {} 个,不可信 {} 个",
+                    changed, repaired, untrustedCount);
+            return activities;
+        }
+
+        // 5) 时间轴收口 + 餐窗口守卫：新时间会让正餐出窗时，只回退时间（距离保留真实值）
+        List<Map<String, Object>> out = fixTimeOverlaps(activities);
+        List<String> after = mealWindowViolations(out, timeStart);
+        if (after.size() > before.size()) {
+            for (Object[] snap : snapshots) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> carrier = (Map<String, Object>) snap[0];
+                carrier.put("travelTimeMin", snap[1]);
+            }
+            out = fixTimeOverlaps(out);
+            log.warn("餐段路程补正: 采纳真实时间会让 {} 处正餐出窗，已回退时间（距离保留真实值）: {}",
+                    after.size() - before.size(), String.join("; ", after));
+            return out;
+        }
+        log.info("餐段路程补正完成: 修正 {} 段，坐标重定位 {} 个，不可信 {} 个", changed, repaired, untrustedCount);
+        return out;
+    }
+
+    /**
+     * 餐段是否需要用真实路网重算：里程缺失，或与「直线 ×1.35 绕行系数」的估算差距
+     * 超过 40%（下限 1km）——已被 correctStep 算过的真实段误差在此阈值内，不会重复打接口。
+     */
+    private boolean mealLegNeedsRoute(Map<String, Object> carrier, double straightKm) {
+        if (!(straightKm > 0)) {
+            return false;
+        }
+        double roadEst = straightKm * 1.35;
+        int existing = toIntSafe(carrier.getOrDefault("travelDistanceKm", carrier.get("travel_distance_km")));
+        if (existing <= 0) {
+            return true;
+        }
+        return Math.abs(existing - roadEst) > Math.max(1.0, roadEst * 0.4);
+    }
+
+    /**
+     * 餐点坐标重定位：以邻近景点为圆心做周边检索（先按名精确、再泛化美食兜底）。
+     *
+     * @param meal 需要重定位的餐活动
+     * @param ref  参考点（同日上一锚点，无则下一锚点），[lng, lat]
+     * @return 新坐标 [lat, lng]；检索不到返回 null
+     */
+    private double[] repairMealCoord(Map<String, Object> meal, double[] ref, String city) {
+        if (restaurantSearchService == null || ref == null) {
+            return null;
+        }
+        String bare = mealBareName(nameOfActivity(meal));
+        if (bare.isBlank()) {
+            return null;
+        }
+        Double refLat = ref[1];
+        Double refLng = ref[0];
+        RestaurantSearchService.RestaurantInfo info = null;
+        try {
+            info = restaurantSearchService.lookupExact(bare, city, refLat, refLng);
+        } catch (Exception e) {
+            log.debug("餐点就近精确检索失败: {}, {}", bare, e.getMessage());
+        }
+        if (info == null) {
+            try {
+                info = restaurantSearchService.searchNearby("美食", city, refLat, refLng);
+            } catch (Exception e) {
+                log.debug("餐点就近泛化检索失败: {}, {}", bare, e.getMessage());
+            }
+        }
+        if (info == null || info.lat() == null || info.lng() == null) {
+            return null;
+        }
+        return new double[]{info.lat(), info.lng()};
+    }
+
+    /** 锚点列表中小于 i 的最大活动下标；无（餐点是当日首个锚点）返回 -1 */
+    private int anchorBefore(List<Integer> anchors, int i) {
+        int found = -1;
+        for (int a : anchors) {
+            if (a >= i) {
+                break;
+            }
+            found = a;
+        }
+        return found;
+    }
+
+    /** 锚点列表中大于 i 的最小活动下标；无（餐点是当日末个锚点）返回 -1 */
+    private int anchorAfter(List<Integer> anchors, int i) {
+        for (int a : anchors) {
+            if (a > i) {
+                return a;
+            }
+        }
+        return -1;
+    }
+
+    /** 两点直线距离（km）；任一缺失返回 -1。坐标为 [lng, lat] */
+    private double straightKm(double[] a, double[] b) {
+        if (a == null || b == null) {
+            return -1;
+        }
+        return geoDistance(a[1], a[0], b[1], b[0]) / 1000.0;
+    }
+
+    private static double round2(double v) {
+        return Math.round(v * 10.0) / 10.0;
+    }
+
+    /**
+     * 餐段补正腿：起点/终点锚点坐标 + 端点活动 + 承载该段 travel 的活动。
+     * travelTimeMin 语义为「到下一个活动的路程」，故承载体是起点 from。
+     */
+    private record MealLeg(double[] fromC, double[] toC, Map<String, Object> from,
+                           Map<String, Object> to, Map<String, Object> carrier) {
     }
 
     /** 首日日窗口下界（分钟）：max(08:00, 出发时刻)；出发时刻缺失/格式异常时按默认 08:00 */
@@ -2349,14 +2676,16 @@ public class TripPlanningAgent {
      *
      * <p>1.31.0 起窗口内无常规槽（{@link DailyMealPlanner#plan} 判空）时不再「保留原位」，
      * 改走 {@link DailyMealPlanner#planForced} <b>强制入窗</b>：正餐仍须落在窗口右缘内
-     * （午 13:30 / 晚 19:30，首日晚出发退化为 15:00 / 20:00），级联允许越过 21:00，
+     * （午 13:30 / 晚 19:30，首日晚出发退化为 14:00 / 20:00），级联允许越过 21:00，
      * 当日随后调 {@link #fixTimeOverlaps} 裁掉超时尾部活动（保餐不删景，用户确认的取舍）；
      * 强制也失败（落位时刻已晚于右缘）才 WARN 保留原位/跳过（见 BUGFIX 1.31.0）。</p>
      *
      * @param timeStart 行程出发时刻（首日日窗口下界取 max(08:00, 出发时刻)）
+     * @param places    预处理景点列表（补餐就近挑选的本地坐标回退，可为 null）
      */
     private List<Map<String, Object>> ensureDailyMeals(List<Map<String, Object>> acts, String city,
-            List<Map<String, Object>> meals, List<String> excludePois, String timeStart) {
+            List<Map<String, Object>> meals, List<String> excludePois, String timeStart,
+            List<Map<String, Object>> places) {
         if (acts == null || acts.isEmpty()) {
             return acts;
         }
@@ -2457,7 +2786,7 @@ public class TripPlanningAgent {
                 boolean rePlace = displacedMeal != null;
                 BackstopMeal named = null;
                 if (!rePlace) {
-                    double[] ref = coordBefore(dayActs, p.index());
+                    double[] ref = coordBefore(dayActs, p.index(), city, places);
                     named = backstopMealName(lunch, city, meals,
                             usedRestaurants, allNames, excludePois,
                             ref == null ? null : ref[0], ref == null ? null : ref[1]);
@@ -2691,13 +3020,27 @@ public class TripPlanningAgent {
         return new DailyMealPlanner.Item(s, dur, Math.max(0, travel));
     }
 
-    /** 指定下标之前的最后一个活动坐标（就近选餐厅的参考点）；无坐标返回 null */
-    private double[] coordBefore(List<Map<String, Object>> dayActs, int index) {
+    /**
+     * 指定下标之前的最后一个活动坐标（就近选餐厅的参考点）；无坐标返回 null
+     *
+     * <p>1.35.0：correctStep 之前活动普遍还没有 lat/lng，只读坐标会让参考点恒为 null、
+     * 补餐挑选退化为「口味匹配 + 池顺序」而非就近——此时回退 {@link #estimateCoord}
+     * （place 自带坐标 → 地理编码缓存 → 内置餐厅表，均不发 API）取参考点。</p>
+     *
+     * @param city   规划城市（estimateCoord 归一化用）
+     * @param places 预处理景点列表（可为 null）
+     */
+    private double[] coordBefore(List<Map<String, Object>> dayActs, int index, String city,
+                                 List<Map<String, Object>> places) {
         for (int i = Math.min(index, dayActs.size()) - 1; i >= 0; i--) {
             Map<String, Object> a = dayActs.get(i);
             if (a.get("lat") instanceof Number && a.get("lng") instanceof Number) {
                 return new double[]{((Number) a.get("lat")).doubleValue(),
                         ((Number) a.get("lng")).doubleValue()};
+            }
+            double[] c = estimateCoord(nameOfActivity(a), city, places);
+            if (c != null) {
+                return c;
             }
         }
         return null;

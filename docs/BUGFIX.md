@@ -11,6 +11,36 @@ TripForge 的所有 Bug 修复都会记录在此文件中。
 
 ---
 
+## [1.35.0] - 2026-10-04
+
+### 修复（餐段距离/时间失真：终末补餐写入的旅行切分估算值不再被真实路网校正）
+
+- **现象**：用户反馈「现在有一些距离时间仍不准确，**特别是餐食部分的距离时间**」。DB 实测两类失真：
+  1. **伪造里程**：`meal travel=15min/1km`、`travelDistanceKm = travelMin*0.067`（宁夏 trip 日志：沙坡头 → 餐厅直线 **144.7km**，却显示 `15min/20km`；宁夏天另有 `15min/1km`）
+  2. **串城坐标**：海南 trip `04d5d712`（city=海南/海口）景点全在海口(20.0,110.3)，餐点却解析到**三亚**(18.22,109.52)——`地理编码成功: 海南鸡饭店 -> (109.51989,18.223123)`，展示 `11min/2.8km` 实为 **214km**
+- **根因**：
+  1. 管道末位 `ensureDailyMealsStep`(2222) / `checkMealWindowsStep`(2224) 位于 `correctStep`(2211) **之后**，补餐/出窗重放写入的 `meal.travelTimeMin = p.travelMin()`、`travelDistanceKm = travelMin*0.067`、`prevAct.splitTravel = min(prevTravel,15)` 之后**没有任何步骤再用真实路网校正**
+  2. `coordBefore` / `annotateMealRestaurants` 调用发生在 `correctStep` **之前**，此时活动尚无 lat/lng → 参考点恒 `null` → 挑餐厅退化为「全市候选」，就近推荐失效；`GeocodeService.CITY_CENTERS`(37 城)**缺 海口/银川/海南/宁夏** → 跨城毒坐标守卫 `center==null → return true` 整体失能
+  3. `RestaurantSearchService.queryPois` 只用 `/v3/place/text`（无 `location`/`radius`）→ 返回全市前 8 条；`city=省份` 时 `citylimit` 弱化 → 跨市结果
+  4. `pickRestaurant` 旧公式 `score = dist + (tagMatch ? 0 : 50000)`（**50km 惩罚**）与 `searchNearby` 旧排序 `d - rating*1000`（**评分 1000 分量级压过距离**）——口味/评分完全压过距离
+- **修复**：
+  1. **管线末位新增 `correctMealLegsStep`**（挂在 `checkMealWindowsStep` 之后，其后不允许再有改写 travel 的步骤）：逐天取有坐标的锚点，仅修正**至少一端是餐、且两锚点相邻**的腿（`travelTimeMin` 语义是「到下一个活动的路程」→ 承载体必须是起点 `from`）；`mealLegNeedsRoute`（现有里程 vs `straight*1.35`，阈值 `max(1.0, roadEst*0.4)`）筛选 → `findBestRoute` 并行算路（RouteService 带 Redis 7 天缓存）→ 写 `travelTimeMin`/`travelDistanceKm`/`transportToNext`
+  2. **距离是地理事实，时间是排程约束**：有时间**增加**才跑 `fixTimeOverlaps`；若采纳后 `mealWindowViolations` 数量增加 → 回退 `travelTimeMin`（**保留真实距离**）+ 重跑 `fixTimeOverlaps`；仅缩短/等值时直接落值，不触碰时间轴
+  3. **串城餐点重定位 `repairMealCoord`**：餐点距同日**前后两锚点都 > `MEAL_COORD_TRUST_KM`(60km)** → 以邻近锚点为圆心 `lookupExact(bare, city, ref)` → 失败再 `searchNearby("美食", city, ref)` 重定位；仍失败 → 加入 identity `untrustedMeals` 集合、**跳过其相关腿**（毒坐标不入库存）
+  4. **`coordBefore` 本地坐标回退**：活动缺 lat/lng 时回退 `estimateCoord`（`enrichMealNames` 已预热 geoNameCache，不发 API）→ 补餐参考点不再恒 null；`annotateMealRestaurants` 改按 day+time 排序遍历、**跨天重置参考点**
+- 涉及文件：`plan-service`（`TripPlanningAgent.java`、`RestaurantSearchService.java`、`MapApiConfig.java`、`application.yml`、新增 `test/.../MealTravelCorrectionTest.java`、`test/.../RestaurantNearbyScoreTest.java`、`MealWindowEnforceTest.java` 反射签名同步）
+- **验证方式与结果（2026-10-04）**
+
+| 项 | 结果 |
+|---|---|
+| 全量 `mvn -o test` | **147/0**（基线 137 + MealTravelCorrectionTest 7 + RestaurantNearbyScoreTest 3）✅ |
+| 部署 | stop → `mvn -o -q -DskipTests package` → start → **6/6 UP（8081-8086）** ✅ |
+| 黄金重规划宁夏 trip `6f183b3a` | `餐段路程补正完成: 修正 4 段，坐标重定位 0 个，不可信 0 个`、`CHECK_MEALS: 违规 0 -> 0`；落库里程与直线估算一致（怀远夜市→午餐 `2min/0.1km`、银川步行街→晚餐 `3min/0.2km` 原为伪造 `15min/1km`）✅ |
+| 新建「E2E海南跨城-1.35.0」（city=海南，原三亚毒坐标对抗） | **18/18 PASS 0 FAIL**：6 个餐点距最近活动 **max 1.0km**（原 214km）、餐厅距上一景点 0.05~0.98km、进餐段里程全部落在 `直线×1.35±60%` 内、餐窗全合规；日志 `餐段路程补正完成: 修正 4 段（仅距离/时间缩短）` ✅ |
+| `node check-meals.js`（新口径门禁） | **violations=0 PASS** ✅ |
+
+---
+
 ## [1.34.1] - 2026-10-04
 
 ### 修复（timeStart 与日程脱节致出窗午餐无法回收 / 午餐退化右缘收紧 14:00）

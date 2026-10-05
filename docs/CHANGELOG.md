@@ -11,6 +11,31 @@ TripForge 的所有重要变更都会记录在此文件中。
 
 ---
 
+## [1.35.0] - 2026-10-04
+
+### 功能/优化（餐厅「上一景点就近」推荐 + 餐段真实路网补正管线步骤）
+
+- **背景**：用户要求「优先推荐距离上一景点近的餐厅」，并反馈「距离时间仍不准确，特别是餐食部分」。根因链与实证见 `docs/BUGFIX.md` 1.35.0
+- **就近推荐（`RestaurantSearchService`）**：
+  1. 有参考点走高德 **`/v3/place/around`**（`location=lng,lat`、`radius`、`sortrule=distance`、`types=050000`），无参考点/无结果回退 `/v3/place/text`；新增 `MapApiConfig.amap.around-url` 配置
+  2. 打分距离优先：新增 `nearbyScore(distKm, rating) = d + (5 - (rating==null?4.5:rating))`（**评分只折算 0~5km**，替掉 `d - rating*1000`）；`MAX_ANCHOR_KM=40` 过滤远离参考点的候选
+  3. `pickRestaurant`：`score = dist + (tagMatch ? 0 : 1500)`（口味只折算 1.5km 优势，替掉 50km 惩罚）；`lookupExact` 同样走 around + 距离过滤，**exact 缓存 key 增加参考点坐标**避免 text/around 结果互相污染
+- **餐段真实路网补正（`TripPlanningAgent`）**：管线末位新增 `correctMealLegsStep` —— 结构与餐窗定稿后，按天锚点配对（仅相邻锚点、承载体=起点）真实算路，覆盖终末补餐写入的旅行切分估算值；**距离直接采纳，时间会让正餐出窗时回退（1.31.0/1.34.1 餐窗口径不变）**；串城餐点按 `MEAL_COORD_TRUST_KM=60` 以邻近景点为圆心就地重定位，重定位失败则跳过该腿（毒坐标不入库）
+- **配套**：`coordBefore` 缺坐标回退 `estimateCoord` 本地坐标（补餐参考点不再恒 null）、`annotateMealRestaurants` 跨天重置参考点
+- 详细根因链与验证见 `docs/BUGFIX.md` 1.35.0（mvn **147/0**、宁夏重规划修正 4 段、海南跨城 E2E **18/18**）
+
+### 验证方式与结果（2026-10-04）
+
+| 项 | 结果 |
+|---|---|
+| 全量 `mvn -o test` | **147/0**（+ MealTravelCorrectionTest 7、RestaurantNearbyScoreTest 3）✅ |
+| 部署 | stop → package → start → **6/6 UP** ✅ |
+| 重规划宁夏 trip `6f183b3a` | `餐段路程补正完成: 修正 4 段`、`CHECK_MEALS 0->0`、餐窗 `all meals in window` ✅ |
+| 新建海南跨城 E2E | **18/18 PASS**：餐点距最近活动 ≤1.0km（原 214km）、餐厅距上一景点 0.05~0.98km、进餐段里程与估算一致 ✅ |
+| `node check-meals.js` | **violations=0 PASS** ✅ |
+
+---
+
 ## [1.34.1] - 2026-10-04
 
 ### 调整（餐次时间窗口径：午餐任何情况 ≤14:00 + 首日 floor 与日程对齐）

@@ -28,6 +28,10 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <li>内存缓存 30 分钟，超时 3s 降级返回 null，不阻塞主流程</li>
  * </ul>
  *
+ * <p>1.35.0 就近推荐修正：有参考点时改走 {@code place/around}（圆形范围 + 距离升序），
+ * 排序改为距离优先、评分为次（{@link #nearbyScore}），并按 {@code MAX_ANCHOR_KM}
+ * 丢弃远离参考点的候选——修复「推荐了别的城市/全城评分最高而非最近」的偏差。</p>
+ *
  * @author TripForge Team
  * @since 1.15.0
  */
@@ -46,6 +50,10 @@ public class RestaurantSearchService {
     private static final int MAX_CACHE_SIZE = 500;
     /** 单次查询最多返回的 POI 数 */
     private static final int MAX_RESULTS = 8;
+    /** 就近检索半径（米）：以参考点为圆心的周边检索范围 */
+    private static final int AROUND_RADIUS_M = 10_000;
+    /** 有参考点时的候选最远距离（km）：超过视为跨城污染结果，直接丢弃（防「餐厅串到别的城市」） */
+    private static final double MAX_ANCHOR_KM = 40.0;
 
     /** 餐厅检索结果（字段与前端 Activity 透传字段对齐） */
     public record RestaurantInfo(String name, Double rating, String cost,
@@ -72,17 +80,26 @@ public class RestaurantSearchService {
         if (bare.isBlank()) {
             return null;
         }
-        String cacheKey = "exact|" + city + "|" + bare;
+        // 缓存键带参考点：around 与 text 的结果不同，共用键会互相污染（1.35.0）
+        String cacheKey = "exact|" + city + "|" + bare
+                + "|" + (nearLat == null ? "" : String.format("%.3f", nearLat))
+                + "|" + (nearLng == null ? "" : String.format("%.3f", nearLng));
         RestaurantInfo cached = getFromCache(cacheKey);
         if (cached != null) {
             return isEmptyMarker(cached) ? null : cached;
         }
 
-        List<Map<String, Object>> pois = queryPois(bare, city);
+        boolean anchored = nearLat != null && nearLng != null;
+        List<Map<String, Object>> pois = queryPois(bare, city, nearLat, nearLng);
+        if (pois.isEmpty() && anchored) {
+            // 参考点周边无命中（如名店确实在城另一头）→ 退化为全城按名检索
+            pois = queryPois(bare, city, null, null);
+        }
+        List<Map<String, Object>> found = pois;
         RestaurantInfo best = null;
         double bestScore = Double.MAX_VALUE;
         int lowRated = 0;
-        for (Map<String, Object> poi : pois) {
+        for (Map<String, Object> poi : found) {
             String poiName = str(poi.get("name"));
             if (!namesMatch(bare, poiName)) {
                 continue;
@@ -100,10 +117,12 @@ public class RestaurantSearchService {
             if (coord == null) {
                 continue;
             }
-            double score = 0;
-            if (nearLat != null && nearLng != null) {
-                score = haversineKm(nearLat, nearLng, coord[1], coord[0]);
+            double dist = anchored ? haversineKm(nearLat, nearLng, coord[1], coord[0]) : -1;
+            if (anchored && dist > MAX_ANCHOR_KM) {
+                log.debug("排除远离参考点的同名餐厅: {} 距参考点 {}km", poiName, Math.round(dist));
+                continue;
             }
+            double score = dist < 0 ? 0 : dist;
             if (score < bestScore) {
                 bestScore = score;
                 best = new RestaurantInfo(poiName, rating, parseCost(poi), parseAddress(poi),
@@ -131,17 +150,22 @@ public class RestaurantSearchService {
             return null;
         }
         String kw = keyword.trim();
+        boolean anchored = nearLat != null && nearLng != null;
         String cacheKey = "nearby|" + city + "|" + kw
-                + "|" + (nearLat == null ? "" : String.format("%.2f", nearLat))
-                + "|" + (nearLng == null ? "" : String.format("%.2f", nearLng));
+                + "|" + (nearLat == null ? "" : String.format("%.3f", nearLat))
+                + "|" + (nearLng == null ? "" : String.format("%.3f", nearLng));
         RestaurantInfo cached = getFromCache(cacheKey);
         if (cached != null) {
             return isEmptyMarker(cached) ? null : cached;
         }
 
-        List<Map<String, Object>> pois = queryPois(kw, city);
+        List<Map<String, Object>> pois = queryPois(kw, city, nearLat, nearLng);
+        if (pois.isEmpty() && anchored) {
+            pois = queryPois(kw, city, null, null);
+        }
+        List<Map<String, Object>> found = pois;
         List<Map<String, Object>> qualified = new ArrayList<>();
-        for (Map<String, Object> poi : pois) {
+        for (Map<String, Object> poi : found) {
             String poiName = str(poi.get("name"));
             if (poiName.length() < 2 || poiName.length() > 20 || !isRestaurantPoi(poi)) {
                 continue;
@@ -150,21 +174,24 @@ public class RestaurantSearchService {
             if (rating != null && rating < MIN_RATING) {
                 continue;
             }
-            if (parseLocation(poi) == null) {
+            double[] c = parseLocation(poi);
+            if (c == null) {
+                continue;
+            }
+            if (anchored && haversineKm(nearLat, nearLng, c[1], c[0]) > MAX_ANCHOR_KM) {
                 continue;
             }
             qualified.add(poi);
         }
-        // 就近 + 评分排序（评分缺失按 0 计，靠后但不淘汰）
-        qualified.sort(Comparator.comparingDouble((Map<String, Object> p) -> {
+        // 距离优先、评分为次（1.35.0）：此前 d - rating*1000 让评分完全压过距离，
+        // 推荐结果常是全城评分最高而非离上一景点最近的餐厅
+        qualified.sort(Comparator.comparingDouble(p -> {
             double[] c = parseLocation(p);
             if (c == null) {
                 return Double.MAX_VALUE;
             }
-            double d = nearLat != null && nearLng != null
-                    ? haversineKm(nearLat, nearLng, c[1], c[0]) : 0;
-            Double r = parseRating(p);
-            return d - (r != null ? r : 0) * 1000;
+            double d = anchored ? haversineKm(nearLat, nearLng, c[1], c[0]) : 0;
+            return nearbyScore(d, parseRating(p));
         }));
 
         RestaurantInfo best = null;
@@ -182,17 +209,28 @@ public class RestaurantSearchService {
         return best;
     }
 
-    /** place/text 文本搜索：citylimit 限定城市，超时/异常返回空列表 */
-    private List<Map<String, Object>> queryPois(String keywords, String city) {
-        String url = mapApiConfig.getAmapPlaceUrl()
-                + "?key=" + mapApiConfig.getAmapApiKey()
-                + "&keywords=" + encode(keywords)
-                + "&city=" + encode(AmapCityAlias.toAmapCity(city))
-                + "&citylimit=true"
-                + "&types=" + encode("050000")
-                + "&offset=" + MAX_RESULTS
-                + "&page=1"
-                + "&extensions=all";
+    /**
+     * 就近候选打分（越小越优）：距离为主、评分为次。
+     *
+     * <p>评分每低 0.5 分等价于远 0.5km，即评分最多只能「抵消」公里级以内的距离差——
+     * 保证同一批候选里最近的餐厅优先（用户诉求：优先推荐距离上一景点近的餐厅）。
+     * 无参考距离（d &lt; 0）时退化为纯评分排序；评分缺失按 4.5 计（不奖励不重罚）。</p>
+     *
+     * @param distKm 与参考点的距离（公里）；负数表示未知
+     * @param rating 评分（可空）
+     */
+    static double nearbyScore(double distKm, Double rating) {
+        double d = distKm < 0 ? 0 : distKm;
+        double r = rating == null ? 4.5 : rating;
+        return d + (5.0 - r);
+    }
+
+    /** 检索 POI：有参考点时走 place/around（圆形范围 + 距离排序），否则走 place/text 城市文本检索 */
+    private List<Map<String, Object>> queryPois(String keywords, String city,
+                                                Double nearLat, Double nearLng) {
+        String url = nearLat != null && nearLng != null
+                ? buildAroundUrl(keywords, city, nearLat, nearLng)
+                : buildTextUrl(keywords, city);
         try {
             throttleAmap();
             Map<String, Object> response = amapWebClient.get()
@@ -222,6 +260,46 @@ public class RestaurantSearchService {
             log.debug("餐厅检索请求失败: keywords={}, city={}, err={}", keywords, city, e.getMessage());
             return List.of();
         }
+    }
+
+    /** place/text 文本检索 URL：citylimit 限定城市，防跨城结果混入 */
+    private String buildTextUrl(String keywords, String city) {
+        return mapApiConfig.getAmapPlaceUrl()
+                + "?key=" + mapApiConfig.getAmapApiKey()
+                + "&keywords=" + encode(keywords)
+                + "&city=" + encode(AmapCityAlias.toAmapCity(city))
+                + "&citylimit=true"
+                + "&types=" + encode("050000")
+                + "&offset=" + MAX_RESULTS
+                + "&page=1"
+                + "&extensions=all";
+    }
+
+    /**
+     * place/around 周边检索 URL：以参考点为圆心、按距离升序返回餐饮 POI。
+     *
+     * <p>与 place/text 的关键差异：text 只能按城市文本匹配（同城内仍是「全市候选」，
+     * 最近的餐厅很可能不在前 8 条里）；around 用 location+radius 直接圈定参考点附近，
+     * sortrule=distance 保证最近优先——这是「优先推荐距离上一景点近的餐厅」的检索基础。</p>
+     */
+    private String buildAroundUrl(String keywords, String city, double lat, double lng) {
+        int radius = (int) Math.min(50_000,
+                Math.max(1_000, AmapCityAlias.radiusKm(city, AROUND_RADIUS_M / 1000.0) * 1000));
+        StringBuilder url = new StringBuilder(mapApiConfig.getAmapAroundUrl())
+                .append("?key=").append(mapApiConfig.getAmapApiKey())
+                .append("&location=")
+                .append(String.format(java.util.Locale.ROOT, "%.6f,%.6f", lng, lat))
+                .append("&keywords=").append(encode(keywords))
+                .append("&types=").append(encode("050000"))
+                .append("&radius=").append(radius)
+                .append("&sortrule=distance")
+                .append("&offset=").append(MAX_RESULTS)
+                .append("&page=1")
+                .append("&extensions=all");
+        if (city != null && !city.isBlank()) {
+            url.append("&city=").append(encode(AmapCityAlias.toAmapCity(city)));
+        }
+        return url.toString();
     }
 
     /** 是否餐饮类 POI（type 含餐饮/food，或未标注类型但带评分） */

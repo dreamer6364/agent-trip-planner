@@ -1,4 +1,4 @@
-server:
+﻿server:
   port: 8083
 
 spring:
@@ -88,6 +88,7 @@ amap:
   walk-url: https://restapi.amap.com/v3/direction/walking
   bicycle-url: https://restapi.amap.com/v4/direction/bicycling
   place-url: https://restapi.amap.com/v3/place/text
+  around-url: https://restapi.amap.com/v3/place/around
   qps-limit: 50
 
 # 百度地图 API

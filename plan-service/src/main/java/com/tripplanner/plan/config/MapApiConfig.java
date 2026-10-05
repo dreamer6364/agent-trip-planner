@@ -38,6 +38,10 @@ public class MapApiConfig {
     @Value("${amap.place-url:https://restapi.amap.com/v3/place/text}")
     private String amapPlaceUrl;
 
+    /** 周边检索（place/around）：按参考点圆形范围 + 距离排序，用于就近餐厅推荐 */
+    @Value("${amap.around-url:https://restapi.amap.com/v3/place/around}")
+    private String amapAroundUrl;
+
     @Value("${amap.qps-limit:50}")
     private int amapQpsLimit;
 
@@ -69,6 +73,7 @@ public class MapApiConfig {
     public String getAmapWalkUrl() { return amapWalkUrl; }
     public String getAmapBicycleUrl() { return amapBicycleUrl; }
     public String getAmapPlaceUrl() { return amapPlaceUrl; }
+    public String getAmapAroundUrl() { return amapAroundUrl; }
     public int getAmapQpsLimit() { return amapQpsLimit; }
 
     public String getBaiduApiKey() { return baiduApiKey; }
