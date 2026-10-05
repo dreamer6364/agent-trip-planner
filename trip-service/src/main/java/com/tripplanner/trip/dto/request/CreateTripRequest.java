@@ -16,7 +16,7 @@ import java.util.Map;
 @Data
 public class CreateTripRequest {
 
-    @NotBlank(message = "标题不能为空")
+    /** 可选：留空时由后端按「规划城市 + 同城序号」自动生成默认名称（如 宁夏、宁夏2） */
     @Size(max = 200, message = "标题长度不能超过 200 字符")
     private String title;
 

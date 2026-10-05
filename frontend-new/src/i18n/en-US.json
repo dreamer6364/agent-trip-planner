@@ -468,7 +468,7 @@
     "aiParse": "AI-powered parsing",
     "startTime": "Start time",
     "endTime": "End time",
-    "titlePlaceholder": "Give your trip a name (optional)",
+    "titlePlaceholder": "Optional — leave blank to auto-name by destination city",
     "planning": "AI planning...",
     "startPlan": "Start AI Planning",
     "saveDraft": "Save as draft"

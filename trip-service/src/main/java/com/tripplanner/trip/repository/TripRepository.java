@@ -105,6 +105,16 @@ public interface TripRepository extends BaseMapper<Trip> {
     List<Trip> searchByKeyword(@Param("userId") String userId, @Param("keyword") String keyword, @Param("offset") int offset, @Param("size") int size);
 
     /**
+     * 查询用户名下标题以指定城市开头的行程（自动生成默认名称时用于同城序号排号，1.36.0）
+     */
+    @Select("""
+        SELECT id, title FROM trips
+        WHERE user_id = #{userId} AND status NOT IN ('deleted', 'archived')
+        AND title LIKE CONCAT(#{city}, '%')
+        """)
+    List<Trip> findTitlesByUserCity(@Param("userId") String userId, @Param("city") String city);
+
+    /**
      * 统计搜索结果
      */
     @Select("SELECT COUNT(1) FROM trips WHERE user_id = #{userId} AND status NOT IN ('deleted', 'archived') AND (title LIKE CONCAT('%', #{keyword}, '%') OR raw_input LIKE CONCAT('%', #{keyword}, '%'))")

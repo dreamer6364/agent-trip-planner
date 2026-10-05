@@ -6,6 +6,7 @@ import com.tripplanner.common.service.PermissionEvaluationService;
 import com.tripplanner.common.exception.BizException;
 import com.tripplanner.common.response.ApiResponse;
 import com.tripplanner.common.response.Meta;
+import com.tripplanner.common.util.CityOwnershipUtils;
 import com.tripplanner.common.util.JsonUtils;
 import com.tripplanner.trip.client.AuthUserClient;
 import com.tripplanner.trip.client.PlanServiceClient;
@@ -65,7 +66,9 @@ public class TripService {
         Trip trip = new Trip();
         trip.setId(UUID.randomUUID().toString().replace("-", ""));
         trip.setUserId(userId);
-        trip.setTitle(request.getTitle());
+        String requestedTitle = request.getTitle() == null ? "" : request.getTitle().trim();
+        boolean autoTitle = requestedTitle.isEmpty();
+        trip.setTitle(autoTitle ? defaultTitle(userId, earlyCity(request), trip.getId()) : requestedTitle);
         trip.setRawInput(request.getRawInput());
         trip.setParsedInput("{}");
         trip.setTimeStart(request.getTimeStart());
@@ -123,6 +126,11 @@ public class TripService {
             
             // 解析结构（含 city/summary/quote）落库，供前端展示与重规划复用
             trip.setParsedInput(jsonUtils.toJson(parseData));
+            if (autoTitle) {
+                // 解析后的城市更权威：以解析城市重算默认名（同名序号排号排除自身）
+                String namedCity = (city != null && !city.isBlank()) ? city : earlyCity(request);
+                trip.setTitle(defaultTitle(userId, namedCity, trip.getId()));
+            }
             tripRepository.updateById(trip);
             
             log.info("解析完成: city={}, places={}, meals={}", city, places.size(), meals.size());
@@ -885,6 +893,71 @@ public class TripService {
             if (text.contains(city)) return city;
         }
         return null;
+    }
+
+    /**
+     * AI 解析前可确定的规划城市：表单显式 city 优先，其次从原始描述识别（1.36.0）
+     */
+    private String earlyCity(CreateTripRequest request) {
+        if (request.getCity() != null && !request.getCity().isBlank()) {
+            return request.getCity().trim();
+        }
+        String city = CityOwnershipUtils.extractCity(request.getRawInput());
+        if (city == null) {
+            city = extractCityFromText(request.getRawInput());
+        }
+        return city;
+    }
+
+    /**
+     * 自动生成默认行程名：城市名 + 同一用户名下同名序号（宁夏、宁夏2、宁夏3）。
+     * 仅当该用户名下已存在与城市名完全相同的标题时才追加序号，序号取「城市+数字」后缀最大值 +1；
+     * 若无同名但存在带序号的残留标题，仍直接使用城市名（名称空位优先回填）。
+     *
+     * @param excludeTripId 需排除的行程 ID（自身已落库后重算时使用，避免把自己算作占用）
+     * @return 默认行程名；城市无法识别时返回「未命名行程」
+     */
+    private String defaultTitle(String userId, String city, String excludeTripId) {
+        if (city == null || city.isBlank()) {
+            return "未命名行程";
+        }
+        String base = city.trim();
+        boolean baseTaken = false;
+        int maxSeq = 1;
+        List<Trip> sameCity = tripRepository.findTitlesByUserCity(userId, base);
+        if (sameCity != null) {
+            for (Trip t : sameCity) {
+                if (t == null || (excludeTripId != null && excludeTripId.equals(t.getId()))) {
+                    continue;
+                }
+                String title = t.getTitle() == null ? "" : t.getTitle().trim();
+                if (title.equals(base)) {
+                    baseTaken = true;
+                } else if (title.startsWith(base)) {
+                    String suffix = title.substring(base.length());
+                    if (isAllDigits(suffix)) {
+                        try {
+                            maxSeq = Math.max(maxSeq, Integer.parseInt(suffix));
+                        } catch (NumberFormatException ignore) {
+                            // 后缀数字超范围：视为不占用序号
+                        }
+                    }
+                }
+            }
+        }
+        return baseTaken ? base + (maxSeq + 1) : base;
+    }
+
+    private static boolean isAllDigits(String text) {
+        if (text.isEmpty() || text.length() > 6) {
+            return false;
+        }
+        for (int i = 0; i < text.length(); i++) {
+            if (!Character.isDigit(text.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private TripResponse toResponseWithLatestVersion(Trip trip) {

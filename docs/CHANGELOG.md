@@ -11,6 +11,33 @@ TripForge 的所有重要变更都会记录在此文件中。
 
 ---
 
+## [1.36.0] - 2026-10-05
+
+### 功能（新建行程默认名称：城市名 + 同一用户名下同城序号）
+
+- **规则（已确认）**：标题留空时默认名称 = **规划城市**；该用户名下已有完全同名的行程则序号后排（`银川` → `银川2` → `银川3`）；序号格式 `城市+数字`（无空格/括号）；**仅对新建生效**，存量旧标题不改
+- **后端 `TripService`**
+  - `CreateTripRequest.title` 去掉 `@NotBlank`（保留 `@Size(max=200)`），空/blank/null 均视为「未命名」
+  - 新增 `earlyCity(request)`：显式 `city` → `CityOwnershipUtils.extractCity(rawInput)` → `extractCityFromText`，在 `insert` 前先算出默认名（草稿路径无 AI 解析，也需有名字；DB `trips.title` 为 `NOT NULL`）
+  - 新增 `defaultTitle(userId, city, excludeTripId)`：查 `TripRepository.findTitlesByUserCity`（`title LIKE '城市%'`，排除 `deleted/archived`，**排除自身 ID**），存在与城市名完全相同的标题才追加序号，序号 = 「城市+纯数字后缀」最大值 +1；`杭州` 与 `杭州2` 并存 → `杭州3`；只有 `杭州2`（`杭州` 已改名）→ 回填 `杭州`；识别不出城市 → 兜底 `未命名行程`
+  - 完整规划路径在解析落库时以**解析出的更权威城市**重算默认名（AI 解析前的猜测名被覆盖），`title` 变更与 `parsedInput` 同一次 `updateById` 落库
+- **前端 `TripForm.vue`**：`buildPayload` 不再用 `tripForm.defaultTitle`（AI 行程规划/AI Trip Plan）兜底，改传 `form.title.trim()`（可为空）交后端命名；标题输入占位符改为「留空则按规划城市自动命名」（zh/en 同步）
+- **序号统计范围**：`user_id` 维度（跨用户互不影响）
+
+### 验证方式与结果（2026-10-05）
+
+| 项 | 结果 |
+|---|---|
+| `mvn -o clean test` | **156/0**（+ 新增 `TripServiceDefaultTitleTest` 9 例）✅ |
+| `npm run build`（vue-tsc + vite） | 通过 ✅ |
+| robocopy dist → gateway static → `mvn -o -q -DskipTests package` | exit 0，占位符文案已进 `gateway/.../static/assets/index-oSoMuo93.js` ✅ |
+| 部署 | stop → start → **6/6 UP** ✅ |
+| E2E（`title136.js`，网关 API） | **8/8 PASS**：空标题草稿 → `银川`；再建 → `银川2`、`银川3`；显式标题 `我的银川专属名` 原样保留；无城市 → `未命名行程`；完整规划（AI 解析城市）→ `银川4` 且终态非 `AI 行程规划` ✅ |
+| 重复执行（数据已占用） | 第二轮得到 `银川5~银川8`，序号继续接排符合预期 ✅ |
+| 测试数据 | 12 个 E2E 测试行程（`银川*`/`未命名行程`/`我的银川专属名`）已全部 `DELETE` 清理，存量行程标题未改动 ✅ |
+
+---
+
 ## [1.35.0] - 2026-10-04
 
 ### 功能/优化（餐厅「上一景点就近」推荐 + 餐段真实路网补正管线步骤）

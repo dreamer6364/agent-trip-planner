@@ -63,7 +63,7 @@ watch(() => props.initialData, (val) => {
 function buildPayload(): CreateTripRequest | null {
   if (!form.rawInput.trim() || !form.timeStart || !form.timeEnd) return null
   const payload: CreateTripRequest = {
-    title: form.title || t('tripForm.defaultTitle'),
+    title: (form.title || '').trim(),
     rawInput: form.rawInput,
     timeStart: form.timeStart,
     timeEnd: form.timeEnd,

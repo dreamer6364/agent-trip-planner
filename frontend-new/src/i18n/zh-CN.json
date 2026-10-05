@@ -468,7 +468,7 @@
     "aiParse": "AI 智能解析",
     "startTime": "开始时间",
     "endTime": "结束时间",
-    "titlePlaceholder": "为你的行程起个名字（可选）",
+    "titlePlaceholder": "为你的行程起个名字（可选，留空则按规划城市自动命名）",
     "planning": "AI 规划中...",
     "startPlan": "开始智能规划",
     "saveDraft": "保存为草稿"
