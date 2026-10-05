@@ -1,7 +1,7 @@
 // 餐次时间窗 DB 扫描（1.31.0 CHECK_MEALS 回归门禁）
 // 用法: node check-meals.js [分钟窗口=120]
 // FAIL 口径（近 N 分钟内的新版本，任一条即 exit 1）:
-//   - 午餐起点不在 [11:00, 15:00]（15:00 为首日晚出发退化右缘，含 13:30 硬右缘与退化带）
+//   - 午餐起点不在 [11:00, 14:00]（14:00 为首日晚出发退化右缘，1.34.1 午间收紧；含 13:30 硬右缘与退化带）
 //   - 晚餐起点不在 [17:00, 20:00]（20:00 为退化右缘）
 //   - 正餐 scheduled_start 缺失
 //   - 任一活动结束 > 21:00，或结束早于起点（跨零点回绕残迹）
@@ -24,7 +24,7 @@ const WHERE_BAD = `(
   (act.activity_type = 'meal' and act.poi_name like '%午餐%'
     and (act.scheduled_start is null or act.scheduled_start = ''
          or time_to_sec(act.scheduled_start) < 11 * 3600
-         or time_to_sec(act.scheduled_start) > 15 * 3600))
+          or time_to_sec(act.scheduled_start) > 14 * 3600))
   or (act.activity_type = 'meal' and act.poi_name like '%晚餐%'
     and (act.scheduled_start is null or act.scheduled_start = ''
          or time_to_sec(act.scheduled_start) < 17 * 3600

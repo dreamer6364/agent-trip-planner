@@ -2255,6 +2255,32 @@ public class TripPlanningAgent {
     }
 
     /**
+     * 首日 floor 与日程起点对齐（1.34.1）
+     *
+     * <p>用户未指定出发时刻时 parse 默认的 timeStart 时分可能是创建时刻（如 16:57），
+     * 而 LLM 常把 day1 排为 08:00 起——两者脱节会让 firstFloor 晚于窗口右缘，
+     * 退化分支唯一候选恒晚于右缘、plan/planForced 必然判空，出窗午餐无法回收
+     * （宁夏案例，见 BUGFIX 1.34.1）。防守卫以日程事实为准：
+     * {@code min(firstFloor, day1 实际最早活动开始)}。</p>
+     *
+     * @param firstFloor firstDayFloor(timeStart) 结果
+     * @param day1       day1 活动列表（可空）
+     */
+    private int alignFirstFloor(int firstFloor, List<Map<String, Object>> day1) {
+        if (day1 == null || day1.isEmpty()) {
+            return firstFloor;
+        }
+        int min = -1;
+        for (Map<String, Object> a : day1) {
+            int s = toMinuteOfDay(a.containsKey("startTime") ? a.get("startTime") : a.get("scheduled_start"));
+            if (s >= 0 && (min < 0 || s < min)) {
+                min = s;
+            }
+        }
+        return min < 0 ? firstFloor : Math.min(firstFloor, min);
+    }
+
+    /**
      * 正餐时间窗违规清单：如 {@code day1 午餐 15:11 出窗} / {@code day2 晚餐缺失}
      *
      * @return 无违规返回空列表
@@ -2270,6 +2296,8 @@ public class TripPlanningAgent {
             int day = toIntSafe(a.get("day"));
             byDay.computeIfAbsent(day <= 0 ? 1 : day, k -> new ArrayList<>()).add(a);
         }
+        // 1.34.1：判定与修复同口径——timeStart 与日程脱节时以日程为准
+        firstFloor = alignFirstFloor(firstFloor, byDay.get(1));
         for (Map.Entry<Integer, List<Map<String, Object>>> e : byDay.entrySet()) {
             int day = e.getKey();
             int dayFloor = day <= 1 ? firstFloor : DailyMealPlanner.DEFAULT_FLOOR_MIN;
@@ -2292,9 +2320,9 @@ public class TripPlanningAgent {
                 if (s < 0) {
                     continue;
                 }
-                // 窗口右缘与 DailyMealPlanner.windowCap 同口径：首日出发晚于右缘退化为 15:00/20:00
+                // 窗口右缘与 DailyMealPlanner.windowCap 同口径：首日出发晚于右缘退化为 14:00/20:00（1.34.1 午间收紧）
                 int winEnd = DailyMealPlanner.winEnd(lunch);
-                int cap = dayFloor > winEnd ? (lunch ? 15 * 60 : 20 * 60) : winEnd;
+                int cap = dayFloor > winEnd ? (lunch ? 14 * 60 : 20 * 60) : winEnd;
                 if (s < DailyMealPlanner.winStart(lunch) || s > cap) {
                     out.add(String.format("day%d %s %s 出窗", day, slotWord, toHhMm(s)));
                 }
@@ -2350,6 +2378,8 @@ public class TripPlanningAgent {
             int day = toIntSafe(a.get("day"));
             byDay.computeIfAbsent(day <= 0 ? 1 : day, k -> new ArrayList<>()).add(a);
         }
+        // 1.34.1：timeStart 与日程起点脱节（parse 默认时分晚于 day1 实际排布）时以日程为准
+        firstFloor = alignFirstFloor(firstFloor, byDay.get(1));
 
         int added = 0;
         int rePlaced = 0;

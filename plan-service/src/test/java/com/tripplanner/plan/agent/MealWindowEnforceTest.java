@@ -167,19 +167,46 @@ class MealWindowEnforceTest {
         assertThat(violations(onlyLunch, "2026-10-05"))
                 .containsExactly("day1 晚餐缺失");
 
-        // 首日 14:00 出发：右缘退化为 15:00 —— 14:30 合规、15:11 仍出窗
+        // 首日 14:00 出发：右缘退化为 14:00（1.34.1 午间收紧）—— 14:00 合规、14:30 即出窗
         List<Map<String, Object>> lateDeparture = new ArrayList<>(List.of(
                 visit("栈桥", 14 * 60, 60, 15),
-                mealAct("老街午餐", 14 * 60 + 30),
+                mealAct("老街午餐", 14 * 60),
                 mealAct("海边晚餐", 18 * 60)));
         assertThat(violations(lateDeparture, "2026-10-05T14:00")).isEmpty();
 
         List<Map<String, Object>> lateLunch = new ArrayList<>(List.of(
                 visit("栈桥", 14 * 60, 60, 15),
-                mealAct("老街午餐", 15 * 60 + 11),
+                mealAct("老街午餐", 14 * 60 + 30),
                 mealAct("海边晚餐", 18 * 60)));
         assertThat(violations(lateLunch, "2026-10-05T14:00"))
-                .containsExactly("day1 午餐 15:11 出窗");
+                .containsExactly("day1 午餐 14:30 出窗");
+    }
+
+    @Test
+    @DisplayName("检查节点 - timeStart 与日程脱节（出发 16:57、day1 排 08:00 起） - floor 以日程为准修复出窗午餐")
+    void checkStep_timeStartScheduleMismatch_repairsOutWindowLunch() throws Exception {
+        // 宁夏案例（BUGFIX 1.34.1）：用户未指定出发时刻 → parse 默认时分 16:57，而 LLM 把
+        // day1 排为 08:00 起。旧逻辑 firstFloor=16:57 > 13:30 → 退化分支唯一候选 16:57 恒
+        // 晚于右缘，plan/planForced 必然判空、15:45 出窗午餐无法回收。floor 与日程对齐后
+        // 午餐零打扰重放进窗
+        List<Map<String, Object>> acts = new ArrayList<>(List.of(
+                visit("沙坡头", 8 * 60, 240, 0),
+                visit("中场休息", 12 * 60, 20, 145),
+                visit("邮政博物馆", 14 * 60 + 45, 43, 17),
+                mealAct("午餐·老毛手抓", 15 * 60 + 45),
+                mealAct("晚餐·国强手抓", 17 * 60 + 33),
+                visit("地质博物馆", 19 * 60 + 10, 85, 0)));
+
+        List<String> before = violations(acts, "2026-10-06T16:57");
+        assertThat(before).containsExactly("day1 午餐 15:45 出窗");
+
+        List<Map<String, Object>> out = checkStep(acts, "2026-10-06T16:57");
+
+        assertThat(violations(out, "2026-10-06T16:57")).isEmpty();
+        Map<String, Object> lunch = findSlot(out, "午");
+        assertThat(lunch).isNotNull();
+        assertThat(lunch.get("name")).isEqualTo("午餐·老毛手抓");
+        assertThat(startMin(lunch)).isBetween(11 * 60, 13 * 60 + 30);
     }
 
     @Test

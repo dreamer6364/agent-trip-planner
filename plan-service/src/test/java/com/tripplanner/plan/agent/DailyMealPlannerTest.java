@@ -149,18 +149,19 @@ class DailyMealPlannerTest {
     }
 
     @Test
-    @DisplayName("每日正餐保底 - 首日 14:00 出发 - 午餐不早于出发时刻且顺延到活动后")
+    @DisplayName("每日正餐保底 - 首日 14:00 出发（退化右缘 14:00） - 午餐落 14:00 抵达即食")
     void plan_lunch_dayStartsAfternoon_clampedToDeparture() {
-        // 14:00 抵达，14:00-14:45 过渡 + 路程 → 午餐落 15:00（最晚落位边界内）
+        // 14:00 出发（退化右缘 14:00，1.34.1 午间收紧）：餐必须 ≤14:00 起 →
+        // 插到过渡活动之前（抵达即食），级联把 14:00-14:45 过渡右推到 15:15 起
         List<DailyMealPlanner.Item> items = List.of(
                 act(14 * 60, 45, 15));
 
         DailyMealPlanner.Placement p = DailyMealPlanner.plan(items, true, 14 * 60);
 
         assertThat(p).isNotNull();
-        // 目标 11:30 < 出发 14:00 → 餐次下界抬到 14:00（原始开始值）
         assertThat(p.startMin()).isEqualTo(14 * 60);
-        assertThat(p.index()).isEqualTo(1);
+        assertThat(p.index()).isEqualTo(0);
+        assertThat(p.forced()).isTrue();
     }
 
     @Test

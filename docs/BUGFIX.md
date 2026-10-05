@@ -11,6 +11,29 @@ TripForge 的所有 Bug 修复都会记录在此文件中。
 
 ---
 
+## [1.34.1] - 2026-10-04
+
+### 修复（timeStart 与日程脱节致出窗午餐无法回收 / 午餐退化右缘收紧 14:00）
+
+- **现象**：宁夏截图问题单（trip `6f183b3a`，16:57 创建）：day1 午餐 **15:45-17:15** 出窗，plan-service 日志 `CHECK_MEALS: 1 处时间窗违规未修复: day1 午餐 15:45 出窗`、`每日正餐保底: day1 午餐出窗且强制入窗失败，保留原位 15:45`；`check-meals.js` FAIL。同时用户提出口径要求：**午餐 14:00 前、晚餐 20:00 前**（原退化右缘午 15:00 不满足）
+- **根因**：① 用户未指定出发时刻 → 前端默认 `timeStart` 时分=创建时刻（16:57），而 LLM 把 day1 排为 08:00 起——两者脱节；② `firstDayFloor` 取 16:57 > 窗口右缘 13:30 → `DailyMealPlanner` 走退化分支，**唯一候选 max(target, floor)=16:57 恒晚于 cap 15:00** → `plan`/`planForced` 必然判空 → 出窗午餐「保留原位」永不回收；判定侧 `mealWindowViolations` 同 floor 同口径，检出却修不了（守卫对脱节行程整体失能）
+- **修复**：
+  1. **floor 与日程对齐**：新增 `TripPlanningAgent.alignFirstFloor`——`ensureDailyMeals` / `mealWindowViolations` 构建 byDay 后取 `min(firstFloor, day1 实际最早活动开始)`，timeStart 与日程脱节时以日程事实为准；落库侧 `MealWindowGuard.findViolations` 同口径（`alignFirstFloor`）
+  2. **午间退化右缘 15:00 → 14:00**：`DailyMealPlanner.latestStart`、`mealWindowViolations` cap、`MealWindowGuard` cap 三处同步（常规右缘 13:30/19:30 不变；晚退化 20:00 保持），任何情况午餐起点 ≤14:00，满足用户口径
+  3. 门禁同步：`check-meals.js` FAIL 口径午餐区间 `[11:00, 15:00]` → `[11:00, 14:00]`
+- 涉及文件：`plan-service`（`TripPlanningAgent.java`、`DailyMealPlanner.java`、`MealWindowEnforceTest.java`、`DailyMealPlannerTest.java`）、`trip-service`（`MealWindowGuard.java`、新增 `test/.../MealWindowGuardTest.java`）、`check-meals.js`
+- **验证方式与结果（2026-10-04）**
+
+| 项 | 结果 |
+|---|---|
+| 全量 `mvn -o test` | **137/0**（基线 133 + 新增 MealWindowGuardTest 3 + 宁夏脱节回归 case 1；`-pl` 单跑会因 common-module 旧 jar 假红，全量 reactor 为准）✅ |
+| 部署 | stop → `mvn -o -q -DskipTests package` → start → **6/6 UP（8081-8086）** ✅ |
+| 新建「去宁夏」×2（AI agent 管线实跑） | `CHECK_MEALS: 违规 0 -> 0` ×2；落库餐窗全合规（午餐 11:30、晚餐 17:30-19:29）✅ |
+| **黄金验证**：重规划原宁夏 trip `6f183b3a`（timeStart 16:57 + 原 15:45 出窗餐完整复现，owner 换 admin 触发，1.31.0 先例） | `每日正餐保底: day1 午餐出窗(15:45)，重放到 12:35`（零打扰落位，邮政博物馆 14:45 不动）；`CHECK_MEALS: 违规 0 -> 0`；4 天餐次 `RESULT: all meals in window` EXIT=0 ✅ |
+| `node check-meals.js 20`（新口径门禁） | **violations=0 PASS** ✅ |
+
+---
+
 ## [1.32.0] - 2026-10-04
 
 ### 修复（导航栏/侧边栏硬编码用户信息、头像 URL 无法清空、侧边栏 /settings 死链）

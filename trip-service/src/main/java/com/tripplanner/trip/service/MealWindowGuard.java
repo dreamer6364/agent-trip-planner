@@ -24,7 +24,9 @@ import java.util.Map;
  * （&lt;10:00 早 / &gt;16:00 晚 / 其余午）；非餐类活动不参与判定。</p>
  *
  * <p><b>首日退化</b>与 DailyMealPlanner 窗口右缘同口径：首日出发时刻本身晚于窗口右缘时
- * 右缘放宽为午 15:00 / 晚 20:00（保住「出发晚也能用餐」），其余天严格 13:30 / 19:30。</p>
+ * 右缘放宽为午 14:00 / 晚 20:00（保住「出发晚也能用餐」；1.34.1 起午间按用户口径收紧，
+ * 任何情况午餐 ≤14:00），其余天严格 13:30 / 19:30。判定 floor 与日程起点对齐
+ * （timeStart 与 day1 实际排布脱节时以日程为准，见 BUGFIX 1.34.1）。</p>
  *
  * <p><b>字段方言</b>：支持 snake_case（TripService 落库映射 activity_type/poi_name/
  * scheduled_start，时刻为 "HH:mm"、day 为 1 基）与 camelCase（InternalController worker
@@ -70,6 +72,8 @@ public final class MealWindowGuard {
         for (Map<String, Object> a : activities) {
             byDay.computeIfAbsent(dayOf(a, firstDate), k -> new ArrayList<>()).add(a);
         }
+        // 1.34.1：timeStart 与日程起点脱节（parse 默认时分晚于 day1 实际排布）时以日程为准
+        firstFloor = alignFirstFloor(firstFloor, byDay.get(1));
         for (Map.Entry<Integer, List<Map<String, Object>>> e : byDay.entrySet()) {
             int day = e.getKey();
             int dayFloor = day <= 1 ? firstFloor : 8 * 60;
@@ -97,8 +101,8 @@ public final class MealWindowGuard {
                     continue;
                 }
                 int winEnd = lunch ? 13 * 60 + 30 : 19 * 60 + 30;
-                // 首日出发晚于右缘 → 退化为 15:00 / 20:00（与 DailyMealPlanner.windowCap 同口径）
-                int cap = dayFloor > winEnd ? (lunch ? 15 * 60 : 20 * 60) : winEnd;
+                // 首日出发晚于右缘 → 退化为 14:00 / 20:00（与 DailyMealPlanner.windowCap 同口径，1.34.1 午间收紧）
+                int cap = dayFloor > winEnd ? (lunch ? 14 * 60 : 20 * 60) : winEnd;
                 int winStart = lunch ? 11 * 60 : 17 * 60;
                 if (s < winStart || s > cap) {
                     out.add(String.format("day%d %s %02d:%02d 出窗", day, slotWord, s / 60, s % 60));
@@ -185,6 +189,17 @@ public final class MealWindowGuard {
         LocalTime t = timeOf(timeStart);
         if (t == null) return 8 * 60;
         return Math.max(8 * 60, t.getHour() * 60 + t.getMinute());
+    }
+
+    /** 首日 floor 与日程起点对齐：返回 min(firstFloor, day1 实际最早活动开始)，day1 无有效时刻时原样返回（1.34.1） */
+    private static int alignFirstFloor(int firstFloor, List<Map<String, Object>> day1) {
+        if (day1 == null || day1.isEmpty()) return firstFloor;
+        Integer min = null;
+        for (Map<String, Object> a : day1) {
+            Integer s = minuteOfDayOf(a);
+            if (s != null && (min == null || s < min)) min = s;
+        }
+        return min == null ? firstFloor : Math.min(firstFloor, min);
     }
 
     /** 行程首日日期；无法解析返回 null */
